@@ -419,8 +419,14 @@ const useDatabaseState = () => {
   const loadUserQuizAttempts = useCallback(async (userId) => {
     try {
       const attempts = await userService.getUserQuizAttempts(userId)
-      setUserQuizAttempts(attempts)
-      return attempts
+      const sorted = Array.isArray(attempts) ? [...attempts].sort((a, b) => {
+        const timeA = new Date(a.completed_at || a.updated_at || a.started_at || a.created_at || 0).getTime()
+        const timeB = new Date(b.completed_at || b.updated_at || b.started_at || b.created_at || 0).getTime()
+        if (timeB !== timeA) return timeB - timeA
+        return String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true })
+      }) : []
+      setUserQuizAttempts(sorted)
+      return sorted
     } catch (err) {
       console.error('Error loading user quiz attempts:', err)
       setError(err.message)
@@ -431,8 +437,14 @@ const useDatabaseState = () => {
   const loadAllQuizAttempts = useCallback(async () => {
     try {
       const attempts = await userService.getAllQuizAttempts()
-      setAllQuizAttempts(attempts)
-      return attempts
+      const sorted = Array.isArray(attempts) ? [...attempts].sort((a, b) => {
+        const timeA = new Date(a.completed_at || a.updated_at || a.started_at || a.created_at || 0).getTime()
+        const timeB = new Date(b.completed_at || b.updated_at || b.started_at || b.created_at || 0).getTime()
+        if (timeB !== timeA) return timeB - timeA
+        return String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true })
+      }) : []
+      setAllQuizAttempts(sorted)
+      return sorted
     } catch (err) {
       console.error('Error loading all quiz attempts:', err)
       setError(err.message)

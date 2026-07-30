@@ -42,9 +42,10 @@ import BusinessIcon from '@mui/icons-material/Business'
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import AssignmentIcon from '@mui/icons-material/Assignment'
+import WhatsAppIcon from '@mui/icons-material/WhatsApp'
 import * as XLSX from 'xlsx'
 import './App.css'
-import { Grid, Card, CardContent, Tooltip, Alert, CircularProgress } from '@mui/material'
+import { Grid, Card, CardContent, Tooltip, Alert, CircularProgress, Chip } from '@mui/material'
 import QuizAttempt from './components/QuizAttempt'
 import { useDatabase } from './hooks/useDatabase'
 
@@ -53,6 +54,7 @@ import AssessmentReport from './components/AssessmentReport'
 import ReportViewer from './components/ReportViewer'
 import AuthPage from './components/AuthPage'
 import UserDashboard from './components/UserDashboard/UserDashboard'
+import WhatsAppButton from './components/WhatsAppButton'
 import AdminDashboard from './components/AdminDashboard'
 import PasswordReset from './components/PasswordReset'
 import PDFTemplateConfig from './components/PDFTemplateConfig'
@@ -279,26 +281,33 @@ function App() {
   const assignedQuizzes = useMemo(() => {
     if (!user) return [];
 
-    const userProfile = profiles.find(p =>
-      (user.profile != null && p.name === user.profile) ||
-      (user.profile_id != null && String(p.id) === String(user.profile_id))
+    const userProfile = (profiles || []).find(p => p &&
+      ((user.profile != null && p.name && p.name.toLowerCase() === user.profile.toLowerCase()) ||
+       (user.profile_id != null && String(p.id) === String(user.profile_id)))
     );
 
-    return quizAssignments
-      .filter(a => 
-        (userProfile && String(a.profile_id) === String(userProfile.id) && !a.user_id) ||
-        (a.user_id && String(a.user_id) === String(user.id))
+    return (quizAssignments || [])
+      .filter(a => a &&
+        ((userProfile && String(a.profile_id) === String(userProfile.id) && !a.user_id) ||
+         (a.user_id && String(a.user_id) === String(user.id)))
       )
       .map(a => {
-        const assignedProfile = userProfile || (a.profile_id ? profiles.find(p => String(p.id) === String(a.profile_id)) : null);
+        const assignedProfile = userProfile || (a.profile_id ? (profiles || []).find(p => p && String(p.id) === String(a.profile_id)) : null);
         return {
           ...a,
-          quiz: savedQuizzes.find(q => String(q.id) === String(a.quiz_id)) || null,
+          quiz: (savedQuizzes || []).find(q => q && String(q.id) === String(a.quiz_id)) || null,
           profile: assignedProfile
         };
       })
       .filter(a => a.quiz); // drop assignments whose quiz was deleted
   }, [user, profiles, savedQuizzes, quizAssignments]);
+
+  const realProfiles = useMemo(() => {
+    return (profiles || []).filter(p => {
+      const name = (p.name || '').trim().toUpperCase();
+      return name && name !== 'SOLV' && name !== 'INDIVIDUAL';
+    });
+  }, [profiles]);
 
   const allowedQuizIds = useMemo(() => {
     return new Set(assignedQuizzes.map(aq => String(aq.quiz_id)));
@@ -545,25 +554,39 @@ function App() {
                 <span className="sidebar__title">{APP_TITLE}</span>
               </div>
               <nav className="sidebar__nav">
-                {navItems.map((item, idx) => (
-                  <div 
-                    key={item.label} 
-                    className={`nav-item ${tab === idx ? 'nav-item--active' : ''}`} 
-                    onClick={() => {
-                       setTab(idx)
-                       setSidebarOpen(false)
-                    }}
-                  >
-                    <div className="nav-item__icon">{item.icon}</div>
-                    <span>{tc(item.label)}</span>
-                  </div>
-                ))}
+                {navItems.map((item, idx) => {
+                  const itemTab = isAdmin ? adminNavItems.findIndex(i => i.permission === item.permission) : idx;
+                  const targetTab = itemTab !== -1 ? itemTab : idx;
+                  return (
+                    <div 
+                      key={item.label} 
+                      className={`nav-item ${tab === targetTab ? 'nav-item--active' : ''}`} 
+                      onClick={() => {
+                        setTab(targetTab);
+                        setSidebarOpen(false);
+                      }}
+                    >
+                      <div className="nav-item__icon">{item.icon}</div>
+                      <span>{tc(item.label)}</span>
+                    </div>
+                  );
+                })}
               </nav>
               <div className="sidebar__footer">
                 <div className="nav-item" onClick={() => setHowToOpen(true)}>
                   <div className="nav-item__icon"><InfoOutlinedIcon /></div>
                   <span>{tc(CHROME_TEXT.howToUse)}</span>
                 </div>
+                <a 
+                  href="https://wa.me/919136899581" 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  className="nav-item nav-item--whatsapp"
+                  style={{ textDecoration: 'none', color: '#25D366' }}
+                >
+                  <div className="nav-item__icon" style={{ color: '#25D366' }}><WhatsAppIcon /></div>
+                  <span style={{ color: 'var(--color-fg)', fontWeight: 600 }}>Chat with us</span>
+                </a>
               </div>
             </aside>
             <div className={`overlay ${sidebarOpen ? 'overlay--visible' : ''}`} onClick={() => setSidebarOpen(false)}></div>
@@ -618,7 +641,7 @@ function App() {
                     )}
                     {tab === 2 && (
                       <ProfileManager 
-                        profiles={profiles} 
+                        profiles={realProfiles} 
                         addProfile={addProfile}
                         updateProfile={updateProfile}
                         deleteProfile={deleteProfile}
@@ -646,7 +669,7 @@ function App() {
                           </Button>
                         </Box>
                         <QuizBuilder
-                          profiles={profiles.filter(p => p.name?.toUpperCase() !== 'SOLV')}
+                          profiles={realProfiles}
                           packets={packets}
                           savedQuizzes={savedQuizzes}
                           addQuiz={addQuiz}
@@ -685,7 +708,7 @@ function App() {
                                   style={{ width: '100%', height: '42px', padding: '0 12px' }}
                                 >
                                   <option value="">-- Select Quiz --</option>
-                                  {savedQuizzes.map((quiz) => (
+                                  {(savedQuizzes || []).map((quiz) => (
                                     <option key={quiz.id} value={quiz.id}>
                                       {quiz.name}
                                     </option>
@@ -725,28 +748,34 @@ function App() {
                                   }}
                                 >
                                   {formTargetType === 'profile' ? (
-                                    profiles.filter(p => p.name?.toUpperCase() !== 'SOLV').map((profile) => {
-                                      const isChecked = formSelectedProfiles.includes(profile.id);
+                                    (realProfiles || []).map((profile) => {
+                                      const isChecked = (formSelectedProfiles || []).includes(profile.id);
+                                      const mappedCount = (quizAssignments || []).filter(aq => aq.profile_id === profile.id && !aq.user_id).length;
                                       return (
-                                        <label key={profile.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginBottom: '6px', fontSize: '14px' }}>
-                                          <input
-                                            type="checkbox"
-                                            checked={isChecked}
-                                            onChange={(e) => {
-                                              if (e.target.checked) {
-                                                setFormSelectedProfiles([...formSelectedProfiles, profile.id]);
-                                              } else {
-                                                setFormSelectedProfiles(formSelectedProfiles.filter(id => id !== profile.id));
-                                              }
-                                            }}
-                                          />
-                                          {profile.name}
+                                        <label key={profile.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', cursor: 'pointer', marginBottom: '6px', fontSize: '14px' }}>
+                                          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <input
+                                              type="checkbox"
+                                              checked={isChecked}
+                                              onChange={(e) => {
+                                                if (e.target.checked) {
+                                                  setFormSelectedProfiles([...(formSelectedProfiles || []), profile.id]);
+                                                } else {
+                                                  setFormSelectedProfiles((formSelectedProfiles || []).filter(id => id !== profile.id));
+                                                }
+                                              }}
+                                            />
+                                            {profile.name}
+                                          </span>
+                                          <span style={{ fontSize: '12px', color: 'var(--color-muted-fg)', backgroundColor: 'var(--color-tertiary)', padding: '2px 8px', borderRadius: '12px', fontWeight: 600 }}>
+                                            {mappedCount} {mappedCount === 1 ? 'assessment' : 'assessments'}
+                                          </span>
                                         </label>
                                       );
                                     })
                                   ) : (
-                                    users.filter(u => u.role !== 'admin' && u.role !== 'super_admin').map((u) => {
-                                      const isChecked = formSelectedUsers.includes(u.id);
+                                    (users || []).filter(u => u.role !== 'admin' && u.role !== 'super_admin').map((u) => {
+                                      const isChecked = (formSelectedUsers || []).includes(u.id);
                                       return (
                                         <label key={u.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginBottom: '6px', fontSize: '14px' }}>
                                           <input
@@ -754,9 +783,9 @@ function App() {
                                             checked={isChecked}
                                             onChange={(e) => {
                                               if (e.target.checked) {
-                                                setFormSelectedUsers([...formSelectedUsers, u.id]);
+                                                setFormSelectedUsers([...(formSelectedUsers || []), u.id]);
                                               } else {
-                                                setFormSelectedUsers(formSelectedUsers.filter(id => id !== u.id));
+                                                setFormSelectedUsers((formSelectedUsers || []).filter(id => id !== u.id));
                                               }
                                             }}
                                           />
@@ -805,19 +834,31 @@ function App() {
                           Assignments by Profile
                         </Typography>
 
-                        {profiles.filter(p => p.name?.toUpperCase() !== 'SOLV').length === 0 && <Typography color="text.secondary">No profiles created.</Typography>}
+                        {(realProfiles || []).length === 0 && <Typography color="text.secondary">No profiles created.</Typography>}
                         <Grid container spacing={3} sx={{ width: '100%', mb: 4 }}>
-                          {profiles.filter(p => p.name?.toUpperCase() !== 'SOLV').map(profile => (
-                            <Grid item xs={12} sm={6} md={4} key={profile.id} sx={{ display: 'flex' }}>
-                              <Card className="assigned-quiz-card" variant="outlined" sx={{ mb: 2, p: 2, background: 'var(--card-bg)', boxShadow: 'var(--card-shadow)', minHeight: 240, height: '100%', display: 'flex', flexDirection: 'column', flex: 1 }}>
-                                <CardContent sx={{ minHeight: 180, height: '100%', display: 'flex', flexDirection: 'column', flex: 1, justifyContent: 'flex-start' }}>
-                                  <Typography variant="h6" sx={{ mb: 1, fontWeight: 700 }}>{profile.name}{profile.type && <Typography component="span" color="text.secondary"> ({profile.type})</Typography>}</Typography>
-                                  <List sx={{ alignItems: 'flex-start' }}>
-                                    {quizAssignments.filter(aq => aq.profile_id === profile.id && !aq.user_id).length === 0 && (
-                                      <ListItem><ListItemText primary="No quizzes assigned." /></ListItem>
-                                    )}
-                                    {quizAssignments.filter(aq => aq.profile_id === profile.id && !aq.user_id).map(aq => {
-                                      const quiz = savedQuizzes.find(q => q.id === aq.quiz_id)
+                          {(realProfiles || []).map(profile => {
+                            const profileAssignments = (quizAssignments || []).filter(aq => aq.profile_id === profile.id && !aq.user_id);
+                            const mappedCount = profileAssignments.length;
+                            return (
+                              <Grid item xs={12} sm={6} md={4} key={profile.id} sx={{ display: 'flex' }}>
+                                <Card className="assigned-quiz-card" variant="outlined" sx={{ mb: 2, p: 2, background: 'var(--card-bg)', boxShadow: 'var(--card-shadow)', minHeight: 240, height: '100%', display: 'flex', flexDirection: 'column', flex: 1 }}>
+                                  <CardContent sx={{ minHeight: 180, height: '100%', display: 'flex', flexDirection: 'column', flex: 1, justifyContent: 'flex-start' }}>
+                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+                                      <Typography variant="h6" sx={{ fontWeight: 700 }}>{profile.name}{profile.type && <Typography component="span" color="text.secondary"> ({profile.type})</Typography>}</Typography>
+                                      <Chip
+                                        label={`${mappedCount} ${mappedCount === 1 ? 'Assessment' : 'Assessments'}`}
+                                        size="small"
+                                        color={mappedCount > 0 ? "primary" : "default"}
+                                        variant="outlined"
+                                        sx={{ fontWeight: 600, fontSize: '11px' }}
+                                      />
+                                    </Box>
+                                    <List sx={{ alignItems: 'flex-start' }}>
+                                      {profileAssignments.length === 0 && (
+                                        <ListItem><ListItemText primary="No quizzes assigned." /></ListItem>
+                                      )}
+                                      {profileAssignments.map(aq => {
+                                      const quiz = (savedQuizzes || []).find(q => q.id === aq.quiz_id)
                                       return quiz ? (
                                         <ListItem 
                                           key={aq.id} 
@@ -869,7 +910,8 @@ function App() {
                                 </CardContent>
                               </Card>
                             </Grid>
-                          ))}
+                          );
+                        })}
                         </Grid>
 
                         {/* Direct User Assignments Section */}
@@ -877,13 +919,13 @@ function App() {
                           Assignments by User
                         </Typography>
                         
-                        {quizAssignments.filter(aq => aq.user_id).length === 0 ? (
+                        {(quizAssignments || []).filter(aq => aq.user_id).length === 0 ? (
                           <Typography color="text.secondary" sx={{ fontStyle: 'italic', mb: 2 }}>
                             No user-specific assignments created yet.
                           </Typography>
                         ) : (
                           <Grid container spacing={3} sx={{ width: '100%' }}>
-                            {users.filter(u => quizAssignments.some(aq => aq.user_id === u.id)).map(userItem => (
+                            {(users || []).filter(u => (quizAssignments || []).some(aq => aq.user_id === u.id)).map(userItem => (
                               <Grid item xs={12} sm={6} md={4} key={userItem.id} sx={{ display: 'flex' }}>
                                 <Card className="assigned-quiz-card" variant="outlined" sx={{ mb: 2, p: 2, background: 'var(--card-bg)', boxShadow: 'var(--card-shadow)', minHeight: 240, height: '100%', display: 'flex', flexDirection: 'column', flex: 1 }}>
                                   <CardContent sx={{ minHeight: 180, height: '100%', display: 'flex', flexDirection: 'column', flex: 1, justifyContent: 'flex-start' }}>
@@ -892,8 +934,8 @@ function App() {
                                       Email: {userItem.email} | Profile Type: {userItem.profile || 'General'}
                                     </Typography>
                                     <List sx={{ alignItems: 'flex-start' }}>
-                                      {quizAssignments.filter(aq => aq.user_id === userItem.id).map(aq => {
-                                        const quiz = savedQuizzes.find(q => q.id === aq.quiz_id)
+                                      {(quizAssignments || []).filter(aq => aq.user_id === userItem.id).map(aq => {
+                                        const quiz = (savedQuizzes || []).find(q => q.id === aq.quiz_id)
                                         return quiz ? (
                                           <ListItem 
                                             key={aq.id} 

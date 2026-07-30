@@ -78,7 +78,8 @@ const QuizAssignmentGraph = ({
           targetPosition: 'left',
         }));
 
-        const profileNodes = (profiles || []).map((profile, index) => ({
+        const validProfiles = (profiles || []).filter(p => p.name && p.name.toUpperCase() !== 'SOLV' && p.name.toUpperCase() !== 'INDIVIDUAL');
+        const profileNodes = validProfiles.map((profile, index) => ({
           id: `profile-${profile.id}`,
           type: 'default',
           position: { x: 400, y: 100 + index * 120 },
@@ -338,23 +339,39 @@ const QuizAssignmentGraph = ({
         ))}
       </div>
 
-      <h4 style={{ fontWeight: 600, marginBottom: 'var(--space-2)' }}>
-        Profiles ({profiles.length}):
-      </h4>
-      <div style={{ marginBottom: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-        {profiles.map((profile) => (
-          <div key={profile.id} style={{ 
-            padding: 'var(--space-3) var(--space-4)', 
-            backgroundColor: 'rgba(166, 85, 247, 0.05)', 
-            borderRadius: 'var(--radius-md)', 
-            border: '1px solid rgba(166, 85, 247, 0.2)' 
-          }}>
-            <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>
-              {profile.name}{profile.type ? ` (${profile.type})` : ''}
-            </span>
-          </div>
-        ))}
-      </div>
+      {(() => {
+        const filteredProfilesList = (profiles || []).filter(p => p.name && p.name.toUpperCase() !== 'SOLV' && p.name.toUpperCase() !== 'INDIVIDUAL');
+        return (
+          <>
+            <h4 style={{ fontWeight: 600, marginBottom: 'var(--space-2)' }}>
+              Profiles ({filteredProfilesList.length}):
+            </h4>
+            <div style={{ marginBottom: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+              {filteredProfilesList.map((profile) => {
+                const count = (quizAssignments || []).filter(aq => aq.profile_id === profile.id && !aq.user_id).length;
+                return (
+                  <div key={profile.id} style={{ 
+                    padding: 'var(--space-3) var(--space-4)', 
+                    backgroundColor: 'rgba(166, 85, 247, 0.05)', 
+                    borderRadius: 'var(--radius-md)', 
+                    border: '1px solid rgba(166, 85, 247, 0.2)',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}>
+                    <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>
+                      {profile.name}{profile.type ? ` (${profile.type})` : ''}
+                    </span>
+                    <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-muted-fg)', backgroundColor: 'var(--color-tertiary)', padding: '2px 8px', borderRadius: '12px', fontWeight: 600 }}>
+                      {count} {count === 1 ? 'assessment' : 'assessments'} mapped
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        );
+      })()}
 
       <h4 style={{ fontWeight: 600, marginBottom: 'var(--space-2)' }}>
         Current Assignments ({quizAssignments?.length || 0}):
