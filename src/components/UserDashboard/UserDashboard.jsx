@@ -4,6 +4,7 @@ import { useDatabase } from '../../hooks/useDatabase';
 import { quizPacketApi } from '../../services/api';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useTranslatedContent } from '../../hooks/useTranslatedContent';
+import WhatsAppButton from '../WhatsAppButton';
 
 // Static UI copy for the dashboard. Every string is fed through the translation
 // hook so the whole page renders in the user's selected language.
@@ -98,21 +99,21 @@ const UserDashboard = ({ setTab }) => {
   const assignedQuizzes = useMemo(() => {
     if (!user) return [];
 
-    const userProfile = profiles.find(p =>
-      (user.profile != null && p.name === user.profile) ||
-      (user.profile_id != null && String(p.id) === String(user.profile_id))
+    const userProfile = (profiles || []).find(p => p &&
+      ((user.profile != null && p.name && p.name.toLowerCase() === user.profile.toLowerCase()) ||
+       (user.profile_id != null && String(p.id) === String(user.profile_id)))
     );
 
-    return quizAssignments
-      .filter(a => 
-        (userProfile && String(a.profile_id) === String(userProfile.id) && !a.user_id) ||
-        (a.user_id && String(a.user_id) === String(user.id))
+    return (quizAssignments || [])
+      .filter(a => a &&
+        ((userProfile && String(a.profile_id) === String(userProfile.id) && !a.user_id) ||
+         (a.user_id && String(a.user_id) === String(user.id)))
       )
       .map(a => {
-        const assignedProfile = userProfile || (a.profile_id ? profiles.find(p => String(p.id) === String(a.profile_id)) : null);
+        const assignedProfile = userProfile || (a.profile_id ? (profiles || []).find(p => p && String(p.id) === String(a.profile_id)) : null);
         return {
           ...a,
-          quiz: quizzes.find(q => String(q.id) === String(a.quiz_id)) || null,
+          quiz: (quizzes || []).find(q => q && String(q.id) === String(a.quiz_id)) || null,
           profile: assignedProfile
         };
       })
@@ -125,7 +126,14 @@ const UserDashboard = ({ setTab }) => {
   }, [assignedQuizzes]);
 
   const filteredUserQuizAttempts = useMemo(() => {
-    return userQuizAttempts.filter(a => allowedQuizIds.has(String(a.quiz_id)));
+    return userQuizAttempts
+      .filter(a => allowedQuizIds.has(String(a.quiz_id)))
+      .sort((a, b) => {
+        const timeA = new Date(a.completed_at || a.updated_at || a.started_at || a.created_at || 0).getTime();
+        const timeB = new Date(b.completed_at || b.updated_at || b.started_at || b.created_at || 0).getTime();
+        if (timeB !== timeA) return timeB - timeA;
+        return String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true });
+      });
   }, [userQuizAttempts, allowedQuizIds]);
 
   // Derive the summary cards stats

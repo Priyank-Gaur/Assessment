@@ -107,7 +107,7 @@ const AdminDashboard = () => {
 
   // Enrich flat attempts with quiz / profile / user objects expected by the UI
   const enrichedAttempts = useMemo(() => {
-    return (allQuizAttempts || []).map(attempt => {
+    const list = (allQuizAttempts || []).map(attempt => {
       const quiz = (quizzes || []).find(q => String(q.id) === String(attempt.quiz_id)) || null
 
       const userData = userMap[attempt.user_id] || null
@@ -150,6 +150,13 @@ const AdminDashboard = () => {
         profile: profile || { name: 'Unknown' },
         user
       }
+    })
+
+    return list.sort((a, b) => {
+      const timeA = new Date(a.completed_at || a.updated_at || a.started_at || a.created_at || 0).getTime()
+      const timeB = new Date(b.completed_at || b.updated_at || b.started_at || b.created_at || 0).getTime()
+      if (timeB !== timeA) return timeB - timeA
+      return String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true })
     })
   }, [allQuizAttempts, quizzes, profiles, userMap])
 
@@ -515,29 +522,38 @@ const AdminDashboard = () => {
     })
   }
 
-  const filteredAttempts = enrichedAttempts.filter(attempt => {
-    // Combine every searchable field into one haystack so a query matches by
-    // quiz, profile, email, user name or organization (in any combination).
-    const haystack = [
-      attempt.quiz?.name,
-      attempt.profile?.name,
-      attempt.user?.email,
-      attempt.user?.name,
-      attempt.user?.organization
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase()
+  const filteredAttempts = useMemo(() => {
+    return enrichedAttempts
+      .filter(attempt => {
+        // Combine every searchable field into one haystack so a query matches by
+        // quiz, profile, email, user name or organization (in any combination).
+        const haystack = [
+          attempt.quiz?.name,
+          attempt.profile?.name,
+          attempt.user?.email,
+          attempt.user?.name,
+          attempt.user?.organization
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
 
-    const tokens = searchTerm.trim().toLowerCase().split(/\s+/).filter(Boolean)
-    const matchesSearch = tokens.every(token => haystack.includes(token))
+        const tokens = searchTerm.trim().toLowerCase().split(/\s+/).filter(Boolean)
+        const matchesSearch = tokens.every(token => haystack.includes(token))
 
-    const matchesFilter = filterStatus === 'all' ||
-      (filterStatus === 'completed' && attempt.completed_at) ||
-      (filterStatus === 'in-progress' && !attempt.completed_at)
+        const matchesFilter = filterStatus === 'all' ||
+          (filterStatus === 'completed' && attempt.completed_at) ||
+          (filterStatus === 'in-progress' && !attempt.completed_at)
 
-    return matchesSearch && matchesFilter
-  })
+        return matchesSearch && matchesFilter
+      })
+      .sort((a, b) => {
+        const timeA = new Date(a.completed_at || a.updated_at || a.started_at || a.created_at || 0).getTime()
+        const timeB = new Date(b.completed_at || b.updated_at || b.started_at || b.created_at || 0).getTime()
+        if (timeB !== timeA) return timeB - timeA
+        return String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true })
+      })
+  }, [enrichedAttempts, searchTerm, filterStatus])
 
   const getOverallStats = () => {
     if (allQuizAttempts.length === 0) {

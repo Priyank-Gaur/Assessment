@@ -2126,14 +2126,19 @@ app.get('/api/quiz-attempts', (req, res) => {
   const withUser = (attempts) =>
     attempts.map(a => ({ ...a, user: resolveAttemptUser(a) }));
 
+  let attemptsList = mockData.quizAttempts || [];
   if (quiz_id) {
-    // Filter attempts by quiz_id
-    const filteredAttempts = mockData.quizAttempts.filter(a => a.quiz_id === quiz_id);
-    res.json(withUser(filteredAttempts));
-  } else {
-    // Return all attempts
-    res.json(withUser(mockData.quizAttempts));
+    attemptsList = attemptsList.filter(a => a.quiz_id === quiz_id);
   }
+
+  const sortedAttempts = [...attemptsList].sort((a, b) => {
+    const timeA = new Date(a.completed_at || a.updated_at || a.started_at || a.created_at || 0).getTime();
+    const timeB = new Date(b.completed_at || b.updated_at || b.started_at || b.created_at || 0).getTime();
+    if (timeB !== timeA) return timeB - timeA;
+    return String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true });
+  });
+
+  res.json(withUser(sortedAttempts));
 });
 
 app.post('/api/quiz-attempts', (req, res) => {
