@@ -132,10 +132,10 @@ export function enrichQuizWithInstructions(quiz) {
     Object.values(quizInstructionsMap).find(e => e.name && quiz.name && e.name.trim().toLowerCase() === quiz.name.trim().toLowerCase());
   
   if (entry) {
-    if (entry.start_instructions) {
+    if (!quiz.start_instructions && entry.start_instructions) {
       quiz.start_instructions = entry.start_instructions;
     }
-    if (entry.report_header) {
+    if (!quiz.report_header && entry.report_header) {
       quiz.report_header = entry.report_header;
     }
   }
