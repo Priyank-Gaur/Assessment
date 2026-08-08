@@ -52,6 +52,10 @@ const AdminDashboard = () => {
   const [organizations, setOrganizations] = useState([])
   const [allUsersList, setAllUsersList] = useState([])
   const [userSearch, setUserSearch] = useState('')
+  const [userOrgFilter, setUserOrgFilter] = useState('all')
+  const [userSortBy, setUserSortBy] = useState('registered_desc')
+  const [regDateFrom, setRegDateFrom] = useState('')
+  const [regDateTo, setRegDateTo] = useState('')
   const [selectedUser, setSelectedUser] = useState(null)
   const [quizSearch, setQuizSearch] = useState('')
   const [selectedQuizStat, setSelectedQuizStat] = useState(null)
@@ -342,17 +346,40 @@ const AdminDashboard = () => {
   }, [quizMaxMarks, quizQuestionMax])
 
   // One row per user, aggregating their attempts into headline metrics plus the
-  // raw rows (used by the drill-down modal). Averages/best use completed attempts only.
+  // raw rows (used by the drill-down modal). Seeded with all registered users.
   const userSummaries = useMemo(() => {
     const map = {}
-    enrichedAttempts.forEach(a => {
-      const key = a.user_id || a.user?.email || 'unknown'
-      if (!map[key]) {
+    const emailToKeyMap = {}
+
+    // Helper to safely resolve user registration date (never fallback to attempt date)
+    const resolveUserRegistrationDate = (userObj, userId, attempt) => {
+      const explicit = userObj?.created_at || userObj?.registered_at || attempt?.user?.created_at || attempt?.user?.registered_at
+      if (explicit) return explicit
+
+      const numId = Number(userId || userObj?.id)
+      if (!isNaN(numId) && numId > 1000000000000 && numId < 3000000000000) {
+        return new Date(numId).toISOString()
+      }
+      return null
+    }
+
+    // First seed from allUsersList so users with 0 attempts are listed with their registration date
+    if (Array.isArray(allUsersList)) {
+      allUsersList.forEach(u => {
+        if (!u || !u.id) return
+        const key = String(u.id)
+        const emailKey = u.email ? u.email.trim().toLowerCase() : null
+        const name = u.user_name || u.name || (u.email ? u.email.split('@')[0] : `User ${u.id}`)
+        const email = u.email || 'No email'
+        const organization = u.organization || 'Not specified'
+        const registeredAt = resolveUserRegistrationDate(u, u.id, null)
+
         map[key] = {
           id: key,
-          name: a.user?.name || 'Unknown User',
-          email: a.user?.email || 'No email',
-          organization: a.user?.organization || 'Not specified',
+          name,
+          email,
+          organization,
+          registeredAt,
           attempts: 0,
           completed: 0,
           scoreSum: 0,
@@ -363,8 +390,59 @@ const AdminDashboard = () => {
           lastActivity: 0,
           rows: []
         }
+        if (emailKey) emailToKeyMap[emailKey] = key
+      })
+    }
+
+    // Aggregate attempts
+    enrichedAttempts.forEach(a => {
+      let key = a.user_id ? String(a.user_id) : null
+      const emailKey = a.user?.email ? a.user.email.trim().toLowerCase() : null
+
+      if (!key || !map[key]) {
+        if (emailKey && emailToKeyMap[emailKey] && map[emailToKeyMap[emailKey]]) {
+          key = emailToKeyMap[emailKey]
+        } else {
+          const foundKey = Object.keys(map).find(k => {
+            const userObj = map[k]
+            return userObj.email && emailKey && userObj.email.trim().toLowerCase() === emailKey
+          })
+          if (foundKey) {
+            key = foundKey
+          } else {
+            key = a.user_id || emailKey || 'unknown'
+          }
+        }
       }
+
+      if (!map[key]) {
+        const uData = userMap[a.user_id]
+        map[key] = {
+          id: key,
+          name: a.user?.name || 'Unknown User',
+          email: a.user?.email || 'No email',
+          organization: a.user?.organization || 'Not specified',
+          registeredAt: resolveUserRegistrationDate(uData, a.user_id, a),
+          attempts: 0,
+          completed: 0,
+          scoreSum: 0,
+          scoreCount: 0,
+          best: 0,
+          obtainedMarks: 0,
+          totalMarks: 0,
+          lastActivity: 0,
+          rows: []
+        }
+        if (emailKey) emailToKeyMap[emailKey] = key
+      }
+
       const u = map[key]
+
+      if (!u.registeredAt) {
+        const uData = userMap[a.user_id]
+        u.registeredAt = resolveUserRegistrationDate(uData, a.user_id, a)
+      }
+
       u.attempts += 1
       u.rows.push(a)
       if (a.completed_at) {
@@ -373,34 +451,98 @@ const AdminDashboard = () => {
         u.scoreSum += s
         u.scoreCount += 1
         if (s > u.best) u.best = s
-        // Actual marks obtained vs. the assessment's fixed maximum. `total_marks`
-        // holds the raw obtained marks; the max comes from the quiz's canonical
-        // total so every attempt of the same assessment agrees.
         u.obtainedMarks += Number(a.total_marks) || 0
         u.totalMarks += getAttemptMaxMarks(a)
       }
-      const t = new Date(a.completed_at || a.started_at || 0).getTime()
+      const t = new Date(a.completed_at || a.started_at || a.created_at || 0).getTime()
       if (t > u.lastActivity) u.lastActivity = t
     })
 
-    return Object.values(map)
-      .map(u => ({
-        ...u,
-        avgScore: u.scoreCount ? Math.round(u.scoreSum / u.scoreCount) : 0,
-        rows: u.rows.sort((a, b) =>
-          new Date(b.completed_at || b.started_at || 0) - new Date(a.completed_at || a.started_at || 0))
-      }))
-      .sort((a, b) => b.avgScore - a.avgScore || b.attempts - a.attempts)
-  }, [enrichedAttempts, getAttemptMaxMarks])
+    return Object.values(map).map(u => ({
+      ...u,
+      avgScore: u.scoreCount ? Math.round(u.scoreSum / u.scoreCount) : 0,
+      rows: u.rows.sort((a, b) =>
+        new Date(b.completed_at || b.started_at || 0) - new Date(a.completed_at || a.started_at || 0))
+    }))
+  }, [allUsersList, enrichedAttempts, userMap, getAttemptMaxMarks])
+
+  const availableUserOrgs = useMemo(() => {
+    const orgs = new Set(userSummaries.map(u => u.organization).filter(Boolean))
+    return Array.from(orgs).sort()
+  }, [userSummaries])
 
   const filteredUserSummaries = useMemo(() => {
+    let result = userSummaries
+
+    // Filter by Registration Date Range
+    if (regDateFrom) {
+      const fromTime = new Date(`${regDateFrom}T00:00:00`).getTime()
+      result = result.filter(u => {
+        if (!u.registeredAt) return false
+        return new Date(u.registeredAt).getTime() >= fromTime
+      })
+    }
+    if (regDateTo) {
+      const toTime = new Date(`${regDateTo}T23:59:59.999`).getTime()
+      result = result.filter(u => {
+        if (!u.registeredAt) return false
+        return new Date(u.registeredAt).getTime() <= toTime
+      })
+    }
+
+    // Filter by Organization
+    if (userOrgFilter && userOrgFilter !== 'all') {
+      result = result.filter(u =>
+        u.organization && u.organization.toLowerCase() === userOrgFilter.toLowerCase()
+      )
+    }
+
+    // Filter by Search Query
     const tokens = userSearch.trim().toLowerCase().split(/\s+/).filter(Boolean)
-    if (tokens.length === 0) return userSummaries
-    return userSummaries.filter(u => {
-      const haystack = `${u.name} ${u.email} ${u.organization}`.toLowerCase()
-      return tokens.every(t => haystack.includes(t))
+    if (tokens.length > 0) {
+      result = result.filter(u => {
+        const haystack = `${u.name} ${u.email} ${u.organization}`.toLowerCase()
+        return tokens.every(t => haystack.includes(t))
+      })
+    }
+
+    const getRegTime = (u) => {
+      if (u.registeredAt) {
+        const t = new Date(u.registeredAt).getTime()
+        if (!isNaN(t) && t > 0) return t
+      }
+      const numId = Number(u.id)
+      if (!isNaN(numId) && numId > 1000000000000 && numId < 3000000000000) {
+        return numId
+      }
+      return 0
+    }
+
+    // Sorting
+    return [...result].sort((a, b) => {
+      const regA = getRegTime(a)
+      const regB = getRegTime(b)
+      const actA = a.lastActivity || regA
+      const actB = b.lastActivity || regB
+
+      switch (userSortBy) {
+        case 'registered_desc':
+          return regB - regA || actB - actA
+        case 'registered_asc':
+          return regA - regB || actA - actB
+        case 'activity_desc':
+          return actB - actA || regB - regA
+        case 'activity_asc':
+          return actA - actB || regA - regB
+        case 'score_desc':
+          return b.avgScore - a.avgScore || regB - regA
+        case 'attempts_desc':
+          return b.attempts - a.attempts || regB - regA
+        default:
+          return regB - regA
+      }
     })
-  }, [userSummaries, userSearch])
+  }, [userSummaries, userSearch, userOrgFilter, userSortBy, regDateFrom, regDateTo])
 
   const scoreBadgeClass = (score) =>
     score >= 80 ? 'badge--success' : score >= 60 ? 'badge--warning' : 'badge--outline'
@@ -492,10 +634,17 @@ const AdminDashboard = () => {
 
   const exportUserSummary = () => {
     const csvData = [
-      ['User', 'Email', 'Organization', 'Attempts', 'Completed', 'Avg Score', 'Best Score', 'Last Activity'],
+      ['User', 'Email', 'Organization', 'Registered Date', 'Attempts', 'Completed', 'Score / Total Score', 'Avg Score (%)', 'Best Score (%)', 'Last Activity'],
       ...filteredUserSummaries.map(u => [
-        u.name, u.email, u.organization, u.attempts, u.completed,
-        `${u.avgScore}%`, `${u.best}%`,
+        u.name,
+        u.email,
+        u.organization,
+        u.registeredAt ? formatDate(u.registeredAt) : 'N/A',
+        u.attempts,
+        u.completed,
+        u.scoreCount > 0 ? `${u.obtainedMarks} / ${u.totalMarks}` : 'N/A',
+        `${u.avgScore}%`,
+        `${u.best}%`,
         u.lastActivity ? formatDate(u.lastActivity) : 'N/A'
       ])
     ]
@@ -833,8 +982,8 @@ const AdminDashboard = () => {
 
       {tab === 1 && (
         <>
-          <div className="admin-controls">
-            <div className="admin-search">
+          <div className="admin-controls" style={{ flexWrap: 'wrap', gap: 'var(--space-3, 12px)' }}>
+            <div className="admin-search" style={{ minWidth: '220px', flex: 1 }}>
               <SearchIcon style={{ color: 'var(--color-muted)' }} />
               <input
                 type="text"
@@ -844,10 +993,120 @@ const AdminDashboard = () => {
               />
             </div>
 
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 'var(--text-xs, 12px)', fontWeight: 600, color: 'var(--color-muted-fg, #6b7280)' }}>Registered:</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <span style={{ fontSize: 'var(--text-xs, 12px)', color: 'var(--color-muted-fg, #6b7280)' }}>From</span>
+                <input
+                  type="date"
+                  style={{
+                    padding: '0.4rem 0.6rem',
+                    borderRadius: 'var(--radius-md, 8px)',
+                    border: '1px solid var(--color-border, #e5e7eb)',
+                    backgroundColor: 'var(--color-surface, #ffffff)',
+                    fontSize: 'var(--text-sm, 13px)',
+                    color: 'var(--color-fg, #1f2937)',
+                    cursor: 'pointer'
+                  }}
+                  value={regDateFrom}
+                  onChange={(e) => setRegDateFrom(e.target.value)}
+                  title="Filter registration date from"
+                />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <span style={{ fontSize: 'var(--text-xs, 12px)', color: 'var(--color-muted-fg, #6b7280)' }}>To</span>
+                <input
+                  type="date"
+                  style={{
+                    padding: '0.4rem 0.6rem',
+                    borderRadius: 'var(--radius-md, 8px)',
+                    border: '1px solid var(--color-border, #e5e7eb)',
+                    backgroundColor: 'var(--color-surface, #ffffff)',
+                    fontSize: 'var(--text-sm, 13px)',
+                    color: 'var(--color-fg, #1f2937)',
+                    cursor: 'pointer'
+                  }}
+                  value={regDateTo}
+                  onChange={(e) => setRegDateTo(e.target.value)}
+                  title="Filter registration date to"
+                />
+              </div>
+              {(regDateFrom || regDateTo) && (
+                <button
+                  className="btn btn--outline"
+                  style={{ padding: '0.35rem 0.6rem', fontSize: '12px' }}
+                  onClick={() => { setRegDateFrom(''); setRegDateTo(''); }}
+                  title="Clear registration date filter"
+                >
+                  Clear Dates
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <FilterListIcon style={{ color: 'var(--color-muted-fg)', fontSize: '1.2rem' }} />
+              <select
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  borderRadius: 'var(--radius-md, 8px)',
+                  border: '1px solid var(--color-border, #e5e7eb)',
+                  backgroundColor: 'var(--color-surface, #ffffff)',
+                  fontSize: 'var(--text-sm, 14px)',
+                  color: 'var(--color-fg, #1f2937)',
+                  cursor: 'pointer'
+                }}
+                value={userOrgFilter}
+                onChange={(e) => setUserOrgFilter(e.target.value)}
+              >
+                <option value="all">All Organizations ({availableUserOrgs.length})</option>
+                {availableUserOrgs.map(org => (
+                  <option key={org} value={org}>{org}</option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: 'var(--text-sm, 14px)', fontWeight: 600, color: 'var(--color-muted-fg, #6b7280)' }}>Sort:</span>
+              <select
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  borderRadius: 'var(--radius-md, 8px)',
+                  border: '1px solid var(--color-border, #e5e7eb)',
+                  backgroundColor: 'var(--color-surface, #ffffff)',
+                  fontSize: 'var(--text-sm, 14px)',
+                  color: 'var(--color-fg, #1f2937)',
+                  cursor: 'pointer'
+                }}
+                value={userSortBy}
+                onChange={(e) => setUserSortBy(e.target.value)}
+              >
+                <option value="registered_desc">Registered Date (Newest First)</option>
+                <option value="registered_asc">Registered Date (Oldest First)</option>
+                <option value="activity_desc">Last Activity (Recent First)</option>
+                <option value="activity_asc">Last Activity (Oldest First)</option>
+                <option value="score_desc">Highest Score First</option>
+                <option value="attempts_desc">Most Attempts First</option>
+              </select>
+            </div>
+
             <button className="btn btn--primary" onClick={exportUserSummary} disabled={filteredUserSummaries.length === 0}>
               <DownloadIcon className="btn-icon" />
               Export
             </button>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: 'var(--space-3, 12px) 0 var(--space-2, 8px) 0' }}>
+            <div style={{ fontSize: 'var(--text-sm, 14px)', fontWeight: 600, color: 'var(--color-fg, #1f2937)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>Total Users:</span>
+              <span className="badge badge--primary" style={{ fontSize: '13px', padding: '0.2rem 0.65rem' }}>
+                {filteredUserSummaries.length}
+              </span>
+              {(userSearch || (userOrgFilter && userOrgFilter !== 'all') || regDateFrom || regDateTo) && (
+                <span style={{ fontSize: 'var(--text-xs, 12px)', color: 'var(--color-muted-fg, #6b7280)', fontWeight: 400 }}>
+                  (filtered from {userSummaries.length} total)
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="admin-table-container">
@@ -855,7 +1114,7 @@ const AdminDashboard = () => {
               <div className="coming-soon">
                 <PeopleAltIcon />
                 <h3>No users found</h3>
-                <p>Try adjusting your search criteria</p>
+                <p>Try adjusting your search or filter criteria</p>
               </div>
             ) : (
               <table className="admin-table">
@@ -863,10 +1122,10 @@ const AdminDashboard = () => {
                   <tr>
                     <th>User</th>
                     <th>Organization</th>
+                    <th>Registered</th>
                     <th>Attempts</th>
                     <th>Completed</th>
-                    <th>Score</th>
-                    <th>Total Score</th>
+                    <th>Score / Total Score</th>
                     <th>Last Activity</th>
                   </tr>
                 </thead>
@@ -888,16 +1147,20 @@ const AdminDashboard = () => {
                         </div>
                       </td>
                       <td><span className="badge badge--primary">{u.organization}</span></td>
+                      <td style={{ fontSize: 'var(--text-sm)' }}>
+                        {u.registeredAt ? formatDate(u.registeredAt) : '—'}
+                      </td>
                       <td style={{ fontWeight: 600 }}>{u.attempts}</td>
                       <td>{u.completed}/{u.attempts}</td>
                       <td>
                         {u.scoreCount > 0 ? (
-                          <span className={`badge ${scoreBadgeClass(u.avgScore)}`}>{u.obtainedMarks}</span>
+                          <span className={`badge ${scoreBadgeClass(u.avgScore)}`}>
+                            {u.obtainedMarks} / {u.totalMarks}
+                          </span>
                         ) : (
                           <span style={{ color: 'var(--color-muted-fg)', fontStyle: 'italic', fontSize: 'var(--text-sm)' }}>—</span>
                         )}
                       </td>
-                      <td>{u.scoreCount > 0 ? u.totalMarks : '—'}</td>
                       <td style={{ fontSize: 'var(--text-sm)' }}>{u.lastActivity ? formatDate(u.lastActivity) : '—'}</td>
                     </tr>
                   ))}
@@ -975,7 +1238,10 @@ const AdminDashboard = () => {
                 <PeopleAltIcon />
                 <div>
                   <span>{selectedUser.name}</span>
-                  <div className="admin-modal__subtitle">{selectedUser.email} · {selectedUser.organization}</div>
+                  <div className="admin-modal__subtitle">
+                    {selectedUser.email} · {selectedUser.organization}
+                    {selectedUser.registeredAt && ` · Registered: ${formatDate(selectedUser.registeredAt)}`}
+                  </div>
                 </div>
               </div>
               <button
@@ -997,12 +1263,10 @@ const AdminDashboard = () => {
                   <div className="admin-user-stat__label">Completed</div>
                 </div>
                 <div className="admin-user-stat">
-                  <div className="admin-user-stat__value">{selectedUser.scoreCount > 0 ? selectedUser.obtainedMarks : '—'}</div>
-                  <div className="admin-user-stat__label">Score</div>
-                </div>
-                <div className="admin-user-stat">
-                  <div className="admin-user-stat__value">{selectedUser.scoreCount > 0 ? selectedUser.totalMarks : '—'}</div>
-                  <div className="admin-user-stat__label">Total Score</div>
+                  <div className="admin-user-stat__value">
+                    {selectedUser.scoreCount > 0 ? `${selectedUser.obtainedMarks} / ${selectedUser.totalMarks}` : '—'}
+                  </div>
+                  <div className="admin-user-stat__label">Score / Total Score</div>
                 </div>
               </div>
 
