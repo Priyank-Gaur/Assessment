@@ -35,6 +35,14 @@ const questionMaxMarks = (question) => {
   return Number(question?.marks) || 1
 }
 
+// Helper to reliably check if an attempt is completed across data variations
+const isAttemptCompleted = (attempt) => {
+  if (!attempt) return false
+  if (attempt.completed_at && String(attempt.completed_at).trim() !== '' && attempt.completed_at !== 'null' && attempt.completed_at !== 'N/A' && attempt.completed_at !== 'undefined') return true
+  if (attempt.status === 'completed') return true
+  return false
+}
+
 // Sum the maximum possible marks across a list of questions.
 const questionsMaxMarks = (questions) =>
   (questions || []).reduce((sum, q) => sum + questionMaxMarks(q), 0)
@@ -52,10 +60,23 @@ const AdminDashboard = () => {
   const [organizations, setOrganizations] = useState([])
   const [allUsersList, setAllUsersList] = useState([])
   const [userSearch, setUserSearch] = useState('')
+  const [userOrgFilter, setUserOrgFilter] = useState('all')
+  const [userSortBy, setUserSortBy] = useState('registered_desc')
+  const [regDateFrom, setRegDateFrom] = useState('')
+  const [regDateTo, setRegDateTo] = useState('')
   const [selectedUser, setSelectedUser] = useState(null)
   const [quizSearch, setQuizSearch] = useState('')
   const [selectedQuizStat, setSelectedQuizStat] = useState(null)
   const [quizRowLimit, setQuizRowLimit] = useState('25') // number string or 'all'
+  const [attemptDateFrom, setAttemptDateFrom] = useState('')
+  const [attemptDateTo, setAttemptDateTo] = useState('')
+  const [attemptOrgFilter, setAttemptOrgFilter] = useState('all')
+  const [attemptSortBy, setAttemptSortBy] = useState('date_desc')
+  const [incompleteSearch, setIncompleteSearch] = useState('')
+  const [incompleteOrgFilter, setIncompleteOrgFilter] = useState('all')
+  const [incompleteDateFrom, setIncompleteDateFrom] = useState('')
+  const [incompleteDateTo, setIncompleteDateTo] = useState('')
+  const [incompleteSortBy, setIncompleteSortBy] = useState('date_desc')
 
   const {
     allQuizAttempts,
@@ -159,6 +180,76 @@ const AdminDashboard = () => {
       return String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true })
     })
   }, [allQuizAttempts, quizzes, profiles, userMap])
+
+  // Deduplicate attempts: ensure a single user has at most one primary entry per quiz
+  const deduplicatedAttempts = useMemo(() => {
+    const attemptsList = enrichedAttempts || []
+    const groups = {}
+
+    attemptsList.forEach(attempt => {
+      let userKey = 'unknown'
+      const uData = userMap[attempt.user_id] || userMap[String(attempt.user_id)]
+      const email = uData?.email || attempt.user?.email || attempt.user_email
+      const name = uData?.user_name || attempt.user?.name || attempt.user_name
+
+      if (email && email !== 'No email' && String(email).trim() !== '') {
+        userKey = `email:${String(email).trim().toLowerCase()}`
+      } else if (name && name !== 'Unknown User' && !String(name).startsWith('User ') && String(name).trim() !== '') {
+        userKey = `name:${String(name).trim().toLowerCase()}`
+      } else if (attempt.user_id) {
+        userKey = `id:${String(attempt.user_id).trim()}`
+      } else {
+        userKey = `id:${attempt.id}`
+      }
+
+      let quizKey = 'unknown_quiz'
+      if (attempt.quiz?.name && attempt.quiz.name !== 'Unknown') {
+        quizKey = attempt.quiz.name.trim().toLowerCase()
+      } else if (attempt.quiz_id) {
+        const q = (quizzes || []).find(q => String(q.id) === String(attempt.quiz_id))
+        if (q && q.name) quizKey = q.name.trim().toLowerCase()
+        else quizKey = String(attempt.quiz_id).trim().toLowerCase()
+      }
+
+      const groupKey = `${userKey}___${quizKey}`
+
+      if (!groups[groupKey]) {
+        groups[groupKey] = []
+      }
+      groups[groupKey].push(attempt)
+    })
+
+    const result = []
+
+    Object.values(groups).forEach(groupAttempts => {
+      const completed = groupAttempts.filter(a => isAttemptCompleted(a))
+      const pending = groupAttempts.filter(a => !isAttemptCompleted(a))
+
+      if (completed.length > 0) {
+        // Keep ONLY the single latest completed attempt per user & quiz
+        completed.sort((a, b) => new Date(b.completed_at || b.updated_at || 0) - new Date(a.completed_at || a.updated_at || 0))
+        result.push(completed[0])
+      } else if (pending.length > 0) {
+        // Keep ONLY the single best pending attempt per user & quiz
+        pending.sort((a, b) => {
+          const answersA = a.answers && typeof a.answers === 'object' ? Object.keys(a.answers).length : 0
+          const answersB = b.answers && typeof b.answers === 'object' ? Object.keys(b.answers).length : 0
+          if (answersB !== answersA) return answersB - answersA
+          const timeA = new Date(a.updated_at || a.started_at || a.created_at || 0).getTime()
+          const timeB = new Date(b.updated_at || b.started_at || b.created_at || 0).getTime()
+          return timeB - timeA
+        })
+        result.push(pending[0])
+      }
+    })
+
+    return result.sort((a, b) => {
+      const timeA = new Date(a.completed_at || a.updated_at || a.started_at || a.created_at || 0).getTime()
+      const timeB = new Date(b.completed_at || b.updated_at || b.started_at || b.created_at || 0).getTime()
+      if (timeB !== timeA) return timeB - timeA
+      return String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true })
+    })
+  }, [enrichedAttempts, userMap, quizzes])
 
   // Count unique active users grouped by their profile
   const usersByProfile = useMemo(() => {
@@ -342,17 +433,40 @@ const AdminDashboard = () => {
   }, [quizMaxMarks, quizQuestionMax])
 
   // One row per user, aggregating their attempts into headline metrics plus the
-  // raw rows (used by the drill-down modal). Averages/best use completed attempts only.
+  // raw rows (used by the drill-down modal). Seeded with all registered users.
   const userSummaries = useMemo(() => {
     const map = {}
-    enrichedAttempts.forEach(a => {
-      const key = a.user_id || a.user?.email || 'unknown'
-      if (!map[key]) {
+    const emailToKeyMap = {}
+
+    // Helper to safely resolve user registration date (never fallback to attempt date)
+    const resolveUserRegistrationDate = (userObj, userId, attempt) => {
+      const explicit = userObj?.created_at || userObj?.registered_at || attempt?.user?.created_at || attempt?.user?.registered_at
+      if (explicit) return explicit
+
+      const numId = Number(userId || userObj?.id)
+      if (!isNaN(numId) && numId > 1000000000000 && numId < 3000000000000) {
+        return new Date(numId).toISOString()
+      }
+      return null
+    }
+
+    // First seed from allUsersList so users with 0 attempts are listed with their registration date
+    if (Array.isArray(allUsersList)) {
+      allUsersList.forEach(u => {
+        if (!u || !u.id) return
+        const key = String(u.id)
+        const emailKey = u.email ? u.email.trim().toLowerCase() : null
+        const name = u.user_name || u.name || (u.email ? u.email.split('@')[0] : `User ${u.id}`)
+        const email = u.email || 'No email'
+        const organization = u.organization || 'Not specified'
+        const registeredAt = resolveUserRegistrationDate(u, u.id, null)
+
         map[key] = {
           id: key,
-          name: a.user?.name || 'Unknown User',
-          email: a.user?.email || 'No email',
-          organization: a.user?.organization || 'Not specified',
+          name,
+          email,
+          organization,
+          registeredAt,
           attempts: 0,
           completed: 0,
           scoreSum: 0,
@@ -363,44 +477,159 @@ const AdminDashboard = () => {
           lastActivity: 0,
           rows: []
         }
+        if (emailKey) emailToKeyMap[emailKey] = key
+      })
+    }
+
+    // Aggregate attempts
+    deduplicatedAttempts.forEach(a => {
+      let key = a.user_id ? String(a.user_id) : null
+      const emailKey = a.user?.email ? a.user.email.trim().toLowerCase() : null
+
+      if (!key || !map[key]) {
+        if (emailKey && emailToKeyMap[emailKey] && map[emailToKeyMap[emailKey]]) {
+          key = emailToKeyMap[emailKey]
+        } else {
+          const foundKey = Object.keys(map).find(k => {
+            const userObj = map[k]
+            return userObj.email && emailKey && userObj.email.trim().toLowerCase() === emailKey
+          })
+          if (foundKey) {
+            key = foundKey
+          } else {
+            key = a.user_id || emailKey || 'unknown'
+          }
+        }
       }
+
+      if (!map[key]) {
+        const uData = userMap[a.user_id]
+        map[key] = {
+          id: key,
+          name: a.user?.name || 'Unknown User',
+          email: a.user?.email || 'No email',
+          organization: a.user?.organization || 'Not specified',
+          registeredAt: resolveUserRegistrationDate(uData, a.user_id, a),
+          attempts: 0,
+          completed: 0,
+          scoreSum: 0,
+          scoreCount: 0,
+          best: 0,
+          obtainedMarks: 0,
+          totalMarks: 0,
+          lastActivity: 0,
+          rows: []
+        }
+        if (emailKey) emailToKeyMap[emailKey] = key
+      }
+
       const u = map[key]
+
+      if (!u.registeredAt) {
+        const uData = userMap[a.user_id]
+        u.registeredAt = resolveUserRegistrationDate(uData, a.user_id, a)
+      }
+
       u.attempts += 1
       u.rows.push(a)
-      if (a.completed_at) {
+      if (isAttemptCompleted(a)) {
         u.completed += 1
         const s = Number(a.score) || 0
         u.scoreSum += s
         u.scoreCount += 1
         if (s > u.best) u.best = s
-        // Actual marks obtained vs. the assessment's fixed maximum. `total_marks`
-        // holds the raw obtained marks; the max comes from the quiz's canonical
-        // total so every attempt of the same assessment agrees.
         u.obtainedMarks += Number(a.total_marks) || 0
         u.totalMarks += getAttemptMaxMarks(a)
       }
-      const t = new Date(a.completed_at || a.started_at || 0).getTime()
+      const t = new Date(a.completed_at || a.started_at || a.created_at || 0).getTime()
       if (t > u.lastActivity) u.lastActivity = t
     })
 
-    return Object.values(map)
-      .map(u => ({
-        ...u,
-        avgScore: u.scoreCount ? Math.round(u.scoreSum / u.scoreCount) : 0,
-        rows: u.rows.sort((a, b) =>
-          new Date(b.completed_at || b.started_at || 0) - new Date(a.completed_at || a.started_at || 0))
-      }))
-      .sort((a, b) => b.avgScore - a.avgScore || b.attempts - a.attempts)
-  }, [enrichedAttempts, getAttemptMaxMarks])
+    return Object.values(map).map(u => ({
+      ...u,
+      avgScore: u.scoreCount ? Math.round(u.scoreSum / u.scoreCount) : 0,
+      rows: u.rows.sort((a, b) =>
+        new Date(b.completed_at || b.started_at || 0) - new Date(a.completed_at || a.started_at || 0))
+    }))
+  }, [allUsersList, deduplicatedAttempts, userMap, getAttemptMaxMarks])
+
+  const availableUserOrgs = useMemo(() => {
+    const orgs = new Set(userSummaries.map(u => u.organization).filter(Boolean))
+    return Array.from(orgs).sort()
+  }, [userSummaries])
 
   const filteredUserSummaries = useMemo(() => {
+    let result = userSummaries
+
+    // Filter by Registration Date Range
+    if (regDateFrom) {
+      const fromTime = new Date(`${regDateFrom}T00:00:00`).getTime()
+      result = result.filter(u => {
+        if (!u.registeredAt) return false
+        return new Date(u.registeredAt).getTime() >= fromTime
+      })
+    }
+    if (regDateTo) {
+      const toTime = new Date(`${regDateTo}T23:59:59.999`).getTime()
+      result = result.filter(u => {
+        if (!u.registeredAt) return false
+        return new Date(u.registeredAt).getTime() <= toTime
+      })
+    }
+
+    // Filter by Organization
+    if (userOrgFilter && userOrgFilter !== 'all') {
+      result = result.filter(u =>
+        u.organization && u.organization.toLowerCase() === userOrgFilter.toLowerCase()
+      )
+    }
+
+    // Filter by Search Query
     const tokens = userSearch.trim().toLowerCase().split(/\s+/).filter(Boolean)
-    if (tokens.length === 0) return userSummaries
-    return userSummaries.filter(u => {
-      const haystack = `${u.name} ${u.email} ${u.organization}`.toLowerCase()
-      return tokens.every(t => haystack.includes(t))
+    if (tokens.length > 0) {
+      result = result.filter(u => {
+        const haystack = `${u.name} ${u.email} ${u.organization}`.toLowerCase()
+        return tokens.every(t => haystack.includes(t))
+      })
+    }
+
+    const getRegTime = (u) => {
+      if (u.registeredAt) {
+        const t = new Date(u.registeredAt).getTime()
+        if (!isNaN(t) && t > 0) return t
+      }
+      const numId = Number(u.id)
+      if (!isNaN(numId) && numId > 1000000000000 && numId < 3000000000000) {
+        return numId
+      }
+      return 0
+    }
+
+    // Sorting
+    return [...result].sort((a, b) => {
+      const regA = getRegTime(a)
+      const regB = getRegTime(b)
+      const actA = a.lastActivity || regA
+      const actB = b.lastActivity || regB
+
+      switch (userSortBy) {
+        case 'registered_desc':
+          return regB - regA || actB - actA
+        case 'registered_asc':
+          return regA - regB || actA - actB
+        case 'activity_desc':
+          return actB - actA || regB - regA
+        case 'activity_asc':
+          return actA - actB || regA - regB
+        case 'score_desc':
+          return b.avgScore - a.avgScore || regB - regA
+        case 'attempts_desc':
+          return b.attempts - a.attempts || regB - regA
+        default:
+          return regB - regA
+      }
     })
-  }, [userSummaries, userSearch])
+  }, [userSummaries, userSearch, userOrgFilter, userSortBy, regDateFrom, regDateTo])
 
   const scoreBadgeClass = (score) =>
     score >= 80 ? 'badge--success' : score >= 60 ? 'badge--warning' : 'badge--outline'
@@ -492,10 +721,17 @@ const AdminDashboard = () => {
 
   const exportUserSummary = () => {
     const csvData = [
-      ['User', 'Email', 'Organization', 'Attempts', 'Completed', 'Avg Score', 'Best Score', 'Last Activity'],
+      ['User', 'Email', 'Organization', 'Registered Date', 'Attempts', 'Completed', 'Score / Total Score', 'Avg Score (%)', 'Best Score (%)', 'Last Activity'],
       ...filteredUserSummaries.map(u => [
-        u.name, u.email, u.organization, u.attempts, u.completed,
-        `${u.avgScore}%`, `${u.best}%`,
+        u.name,
+        u.email,
+        u.organization,
+        u.registeredAt ? formatDate(u.registeredAt) : 'N/A',
+        u.attempts,
+        u.completed,
+        u.scoreCount > 0 ? `${u.obtainedMarks} / ${u.totalMarks}` : 'N/A',
+        `${u.avgScore}%`,
+        `${u.best}%`,
         u.lastActivity ? formatDate(u.lastActivity) : 'N/A'
       ])
     ]
@@ -523,10 +759,44 @@ const AdminDashboard = () => {
   }
 
   const filteredAttempts = useMemo(() => {
-    return enrichedAttempts
-      .filter(attempt => {
-        // Combine every searchable field into one haystack so a query matches by
-        // quiz, profile, email, user name or organization (in any combination).
+    let result = deduplicatedAttempts
+
+    // Filter by Attempt Date Range
+    if (attemptDateFrom) {
+      const fromTime = new Date(`${attemptDateFrom}T00:00:00`).getTime()
+      result = result.filter(a => {
+        const t = new Date(a.completed_at || a.updated_at || a.started_at || a.created_at || 0).getTime()
+        return t >= fromTime
+      })
+    }
+    if (attemptDateTo) {
+      const toTime = new Date(`${attemptDateTo}T23:59:59.999`).getTime()
+      result = result.filter(a => {
+        const t = new Date(a.completed_at || a.updated_at || a.started_at || a.created_at || 0).getTime()
+        return t <= toTime
+      })
+    }
+
+    // Filter by Organization
+    if (attemptOrgFilter && attemptOrgFilter !== 'all') {
+      result = result.filter(a =>
+        a.user?.organization && a.user.organization.toLowerCase() === attemptOrgFilter.toLowerCase()
+      )
+    }
+
+    // Filter by Status
+    if (filterStatus && filterStatus !== 'all') {
+      result = result.filter(a => {
+        if (filterStatus === 'completed') return isAttemptCompleted(a)
+        if (filterStatus === 'in-progress') return !isAttemptCompleted(a)
+        return true
+      })
+    }
+
+    // Filter by Search Query
+    const tokens = searchTerm.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    if (tokens.length > 0) {
+      result = result.filter(attempt => {
         const haystack = [
           attempt.quiz?.name,
           attempt.profile?.name,
@@ -537,26 +807,46 @@ const AdminDashboard = () => {
           .filter(Boolean)
           .join(' ')
           .toLowerCase()
-
-        const tokens = searchTerm.trim().toLowerCase().split(/\s+/).filter(Boolean)
-        const matchesSearch = tokens.every(token => haystack.includes(token))
-
-        const matchesFilter = filterStatus === 'all' ||
-          (filterStatus === 'completed' && attempt.completed_at) ||
-          (filterStatus === 'in-progress' && !attempt.completed_at)
-
-        return matchesSearch && matchesFilter
+        return tokens.every(t => haystack.includes(t))
       })
-      .sort((a, b) => {
-        const timeA = new Date(a.completed_at || a.updated_at || a.started_at || a.created_at || 0).getTime()
-        const timeB = new Date(b.completed_at || b.updated_at || b.started_at || b.created_at || 0).getTime()
-        if (timeB !== timeA) return timeB - timeA
-        return String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true })
-      })
-  }, [enrichedAttempts, searchTerm, filterStatus])
+    }
+
+    // Sorting
+    return [...result].sort((a, b) => {
+      const timeA = new Date(a.completed_at || a.updated_at || a.started_at || a.created_at || 0).getTime()
+      const timeB = new Date(b.completed_at || b.updated_at || b.started_at || b.created_at || 0).getTime()
+      const scoreA = Number(a.score) || 0
+      const scoreB = Number(b.score) || 0
+      const nameA = String(a.user?.name || '')
+      const nameB = String(b.user?.name || '')
+      const quizA = String(a.quiz?.name || '')
+      const quizB = String(b.quiz?.name || '')
+
+      switch (attemptSortBy) {
+        case 'date_desc':
+          if (timeB !== timeA) return timeB - timeA
+          return String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true })
+        case 'date_asc':
+          if (timeA !== timeB) return timeA - timeB
+          return String(a.id || '').localeCompare(String(b.id || ''), undefined, { numeric: true })
+        case 'score_desc':
+          if (scoreB !== scoreA) return scoreB - scoreA
+          return timeB - timeA
+        case 'score_asc':
+          if (scoreA !== scoreB) return scoreA - scoreB
+          return timeB - timeA
+        case 'name_asc':
+          return nameA.localeCompare(nameB) || timeB - timeA
+        case 'quiz_asc':
+          return quizA.localeCompare(quizB) || timeB - timeA
+        default:
+          return timeB - timeA
+      }
+    })
+  }, [deduplicatedAttempts, searchTerm, filterStatus, attemptOrgFilter, attemptDateFrom, attemptDateTo, attemptSortBy])
 
   const getOverallStats = () => {
-    if (allQuizAttempts.length === 0) {
+    if (!deduplicatedAttempts || deduplicatedAttempts.length === 0) {
       return {
         totalAttempts: 0,
         completedAttempts: 0,
@@ -566,11 +856,11 @@ const AdminDashboard = () => {
       }
     }
 
-    const totalAttempts = allQuizAttempts.length
-    const completedAttempts = allQuizAttempts.filter(attempt => attempt.completed_at).length
-    const totalMarksSum = allQuizAttempts.reduce((sum, attempt) => sum + (attempt.total_marks || 0), 0)
-    const uniqueUsers = new Set(allQuizAttempts.map(attempt => attempt.user_id).filter(Boolean)).size
-    const completionRate = (completedAttempts / totalAttempts) * 100
+    const totalAttempts = deduplicatedAttempts.length
+    const completedAttempts = deduplicatedAttempts.filter(attempt => isAttemptCompleted(attempt)).length
+    const totalMarksSum = deduplicatedAttempts.reduce((sum, attempt) => sum + (attempt.total_marks || 0), 0)
+    const uniqueUsers = new Set(deduplicatedAttempts.map(attempt => attempt.user_id).filter(Boolean)).size
+    const completionRate = totalAttempts > 0 ? (completedAttempts / totalAttempts) * 100 : 0
 
     return {
       totalAttempts,
@@ -583,19 +873,24 @@ const AdminDashboard = () => {
 
   const exportData = () => {
     const csvData = [
-      ['User Email', 'Quiz Name', 'Profile', 'Score', 'Status', 'Started At', 'Completed At'],
+      ['User Name', 'User Email', 'Organization', 'Quiz Name', 'Profile', 'Score', 'Status', 'Started At', 'Completed At'],
       ...filteredAttempts.map(attempt => [
+        attempt.user?.name || 'Unknown User',
         attempt.user?.email || 'Anonymous',
+        attempt.user?.organization || 'Not specified',
         attempt.quiz?.name || 'Unknown',
         attempt.profile?.name || 'Unknown',
-        attempt.score || 0,
-        attempt.completed_at ? 'Completed' : 'In Progress',
-        formatDate(attempt.started_at),
-        attempt.completed_at ? formatDate(attempt.completed_at) : 'N/A'
+        isAttemptCompleted(attempt) ? (attempt.score || 0) : 'N/A',
+        isAttemptCompleted(attempt) ? 'Completed' : 'In Progress',
+        attempt.started_at ? formatDate(attempt.started_at) : 'N/A',
+        isAttemptCompleted(attempt) ? formatDate(attempt.completed_at || attempt.updated_at) : 'N/A'
       ])
     ]
 
-    const csvContent = csvData.map(row => row.join(',')).join('\n')
+    const csvContent = csvData.map(row => row.map(c => {
+      const s = String(c ?? '')
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    }).join(',')).join('\n')
     const blob = new Blob([csvContent], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -733,29 +1028,151 @@ const AdminDashboard = () => {
 
       {tab === 0 && (
         <>
-          <div className="admin-controls">
-            <div className="admin-search">
+          <div className="admin-controls" style={{ flexWrap: 'wrap', gap: 'var(--space-3, 12px)' }}>
+            <div className="admin-search" style={{ minWidth: '220px', flex: 1 }}>
               <SearchIcon style={{ color: 'var(--color-muted)' }} />
               <input 
                 type="text" 
-                placeholder="Search by quiz, profile, or email..." 
+                placeholder="Search by user, email, quiz, profile, or organization..." 
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
             
-            <button 
-              className="btn btn--outline" 
-              onClick={() => setFilterStatus(filterStatus === 'all' ? 'completed' : filterStatus === 'completed' ? 'in-progress' : 'all')}
-            >
-              <FilterListIcon className="btn-icon" />
-              {filterStatus === 'all' ? 'All' : filterStatus === 'completed' ? 'Completed' : 'In Progress'}
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 'var(--text-xs, 12px)', fontWeight: 600, color: 'var(--color-muted-fg, #6b7280)' }}>Attempt Date:</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <span style={{ fontSize: 'var(--text-xs, 12px)', color: 'var(--color-muted-fg, #6b7280)' }}>From</span>
+                <input
+                  type="date"
+                  style={{
+                    padding: '0.4rem 0.6rem',
+                    borderRadius: 'var(--radius-md, 8px)',
+                    border: '1px solid var(--color-border, #e5e7eb)',
+                    backgroundColor: 'var(--color-surface, #ffffff)',
+                    fontSize: 'var(--text-sm, 13px)',
+                    color: 'var(--color-fg, #1f2937)',
+                    cursor: 'pointer'
+                  }}
+                  value={attemptDateFrom}
+                  onChange={(e) => setAttemptDateFrom(e.target.value)}
+                  title="Filter attempt date from"
+                />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <span style={{ fontSize: 'var(--text-xs, 12px)', color: 'var(--color-muted-fg, #6b7280)' }}>To</span>
+                <input
+                  type="date"
+                  style={{
+                    padding: '0.4rem 0.6rem',
+                    borderRadius: 'var(--radius-md, 8px)',
+                    border: '1px solid var(--color-border, #e5e7eb)',
+                    backgroundColor: 'var(--color-surface, #ffffff)',
+                    fontSize: 'var(--text-sm, 13px)',
+                    color: 'var(--color-fg, #1f2937)',
+                    cursor: 'pointer'
+                  }}
+                  value={attemptDateTo}
+                  onChange={(e) => setAttemptDateTo(e.target.value)}
+                  title="Filter attempt date to"
+                />
+              </div>
+              {(attemptDateFrom || attemptDateTo) && (
+                <button
+                  className="btn btn--outline"
+                  style={{ padding: '0.35rem 0.6rem', fontSize: '12px' }}
+                  onClick={() => { setAttemptDateFrom(''); setAttemptDateTo(''); }}
+                  title="Clear attempt date filter"
+                >
+                  Clear Dates
+                </button>
+              )}
+            </div>
 
-            <button className="btn btn--primary" onClick={exportData}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <FilterListIcon style={{ color: 'var(--color-muted-fg)', fontSize: '1.2rem' }} />
+              <select
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  borderRadius: 'var(--radius-md, 8px)',
+                  border: '1px solid var(--color-border, #e5e7eb)',
+                  backgroundColor: 'var(--color-surface, #ffffff)',
+                  fontSize: 'var(--text-sm, 14px)',
+                  color: 'var(--color-fg, #1f2937)',
+                  cursor: 'pointer'
+                }}
+                value={attemptOrgFilter}
+                onChange={(e) => setAttemptOrgFilter(e.target.value)}
+              >
+                <option value="all">All Organizations ({availableUserOrgs.length})</option>
+                {availableUserOrgs.map(org => (
+                  <option key={org} value={org}>{org}</option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <select
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  borderRadius: 'var(--radius-md, 8px)',
+                  border: '1px solid var(--color-border, #e5e7eb)',
+                  backgroundColor: 'var(--color-surface, #ffffff)',
+                  fontSize: 'var(--text-sm, 14px)',
+                  color: 'var(--color-fg, #1f2937)',
+                  cursor: 'pointer'
+                }}
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+              >
+                <option value="all">All Statuses</option>
+                <option value="completed">Completed</option>
+                <option value="in-progress">In Progress</option>
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: 'var(--text-sm, 14px)', fontWeight: 600, color: 'var(--color-muted-fg, #6b7280)' }}>Sort:</span>
+              <select
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  borderRadius: 'var(--radius-md, 8px)',
+                  border: '1px solid var(--color-border, #e5e7eb)',
+                  backgroundColor: 'var(--color-surface, #ffffff)',
+                  fontSize: 'var(--text-sm, 14px)',
+                  color: 'var(--color-fg, #1f2937)',
+                  cursor: 'pointer'
+                }}
+                value={attemptSortBy}
+                onChange={(e) => setAttemptSortBy(e.target.value)}
+              >
+                <option value="date_desc">Attempt Date (Newest First)</option>
+                <option value="date_asc">Attempt Date (Oldest First)</option>
+                <option value="score_desc">Highest Score First</option>
+                <option value="score_asc">Lowest Score First</option>
+                <option value="name_asc">User Name (A to Z)</option>
+                <option value="quiz_asc">Quiz Name (A to Z)</option>
+              </select>
+            </div>
+
+            <button className="btn btn--primary" onClick={exportData} disabled={filteredAttempts.length === 0}>
               <DownloadIcon className="btn-icon" />
               Export
             </button>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: 'var(--space-3, 12px) 0 var(--space-2, 8px) 0' }}>
+            <div style={{ fontSize: 'var(--text-sm, 14px)', fontWeight: 600, color: 'var(--color-fg, #1f2937)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>Total Attempts:</span>
+              <span className="badge badge--primary" style={{ fontSize: '13px', padding: '0.2rem 0.65rem' }}>
+                {filteredAttempts.length}
+              </span>
+              {(searchTerm || (attemptOrgFilter && attemptOrgFilter !== 'all') || filterStatus !== 'all' || attemptDateFrom || attemptDateTo) && (
+                <span style={{ fontSize: 'var(--text-xs, 12px)', color: 'var(--color-muted-fg, #6b7280)', fontWeight: 400 }}>
+                  (filtered from {deduplicatedAttempts.length} total)
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="admin-table-container">
@@ -794,7 +1211,7 @@ const AdminDashboard = () => {
                         <span className="badge badge--primary">{attempt.profile?.name || 'Unknown'}</span>
                       </td>
                       <td>
-                        {attempt.completed_at ? (() => {
+                        {isAttemptCompleted(attempt) ? (() => {
                           // Show actual marks: obtained (total_marks) out of the
                           // assessment's canonical maximum possible score.
                           const obtained = Number(attempt.total_marks) || 0
@@ -809,7 +1226,7 @@ const AdminDashboard = () => {
                         )}
                       </td>
                       <td>
-                        {attempt.completed_at ? (
+                        {isAttemptCompleted(attempt) ? (
                           <span className="badge badge--success">
                             <CheckCircleIcon style={{ width: '14px', height: '14px', marginRight: '4px' }} />
                             Completed
@@ -821,7 +1238,7 @@ const AdminDashboard = () => {
                           </span>
                         )}
                       </td>
-                      <td style={{ fontSize: 'var(--text-sm)' }}>{attempt.completed_at ? formatDate(attempt.completed_at) : '—'}</td>
+                      <td style={{ fontSize: 'var(--text-sm)' }}>{isAttemptCompleted(attempt) ? formatDate(attempt.completed_at || attempt.updated_at) : '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -833,8 +1250,8 @@ const AdminDashboard = () => {
 
       {tab === 1 && (
         <>
-          <div className="admin-controls">
-            <div className="admin-search">
+          <div className="admin-controls" style={{ flexWrap: 'wrap', gap: 'var(--space-3, 12px)' }}>
+            <div className="admin-search" style={{ minWidth: '220px', flex: 1 }}>
               <SearchIcon style={{ color: 'var(--color-muted)' }} />
               <input
                 type="text"
@@ -844,10 +1261,120 @@ const AdminDashboard = () => {
               />
             </div>
 
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 'var(--text-xs, 12px)', fontWeight: 600, color: 'var(--color-muted-fg, #6b7280)' }}>Registered:</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <span style={{ fontSize: 'var(--text-xs, 12px)', color: 'var(--color-muted-fg, #6b7280)' }}>From</span>
+                <input
+                  type="date"
+                  style={{
+                    padding: '0.4rem 0.6rem',
+                    borderRadius: 'var(--radius-md, 8px)',
+                    border: '1px solid var(--color-border, #e5e7eb)',
+                    backgroundColor: 'var(--color-surface, #ffffff)',
+                    fontSize: 'var(--text-sm, 13px)',
+                    color: 'var(--color-fg, #1f2937)',
+                    cursor: 'pointer'
+                  }}
+                  value={regDateFrom}
+                  onChange={(e) => setRegDateFrom(e.target.value)}
+                  title="Filter registration date from"
+                />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <span style={{ fontSize: 'var(--text-xs, 12px)', color: 'var(--color-muted-fg, #6b7280)' }}>To</span>
+                <input
+                  type="date"
+                  style={{
+                    padding: '0.4rem 0.6rem',
+                    borderRadius: 'var(--radius-md, 8px)',
+                    border: '1px solid var(--color-border, #e5e7eb)',
+                    backgroundColor: 'var(--color-surface, #ffffff)',
+                    fontSize: 'var(--text-sm, 13px)',
+                    color: 'var(--color-fg, #1f2937)',
+                    cursor: 'pointer'
+                  }}
+                  value={regDateTo}
+                  onChange={(e) => setRegDateTo(e.target.value)}
+                  title="Filter registration date to"
+                />
+              </div>
+              {(regDateFrom || regDateTo) && (
+                <button
+                  className="btn btn--outline"
+                  style={{ padding: '0.35rem 0.6rem', fontSize: '12px' }}
+                  onClick={() => { setRegDateFrom(''); setRegDateTo(''); }}
+                  title="Clear registration date filter"
+                >
+                  Clear Dates
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <FilterListIcon style={{ color: 'var(--color-muted-fg)', fontSize: '1.2rem' }} />
+              <select
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  borderRadius: 'var(--radius-md, 8px)',
+                  border: '1px solid var(--color-border, #e5e7eb)',
+                  backgroundColor: 'var(--color-surface, #ffffff)',
+                  fontSize: 'var(--text-sm, 14px)',
+                  color: 'var(--color-fg, #1f2937)',
+                  cursor: 'pointer'
+                }}
+                value={userOrgFilter}
+                onChange={(e) => setUserOrgFilter(e.target.value)}
+              >
+                <option value="all">All Organizations ({availableUserOrgs.length})</option>
+                {availableUserOrgs.map(org => (
+                  <option key={org} value={org}>{org}</option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: 'var(--text-sm, 14px)', fontWeight: 600, color: 'var(--color-muted-fg, #6b7280)' }}>Sort:</span>
+              <select
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  borderRadius: 'var(--radius-md, 8px)',
+                  border: '1px solid var(--color-border, #e5e7eb)',
+                  backgroundColor: 'var(--color-surface, #ffffff)',
+                  fontSize: 'var(--text-sm, 14px)',
+                  color: 'var(--color-fg, #1f2937)',
+                  cursor: 'pointer'
+                }}
+                value={userSortBy}
+                onChange={(e) => setUserSortBy(e.target.value)}
+              >
+                <option value="registered_desc">Registered Date (Newest First)</option>
+                <option value="registered_asc">Registered Date (Oldest First)</option>
+                <option value="activity_desc">Last Activity (Recent First)</option>
+                <option value="activity_asc">Last Activity (Oldest First)</option>
+                <option value="score_desc">Highest Score First</option>
+                <option value="attempts_desc">Most Attempts First</option>
+              </select>
+            </div>
+
             <button className="btn btn--primary" onClick={exportUserSummary} disabled={filteredUserSummaries.length === 0}>
               <DownloadIcon className="btn-icon" />
               Export
             </button>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: 'var(--space-3, 12px) 0 var(--space-2, 8px) 0' }}>
+            <div style={{ fontSize: 'var(--text-sm, 14px)', fontWeight: 600, color: 'var(--color-fg, #1f2937)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>Total Users:</span>
+              <span className="badge badge--primary" style={{ fontSize: '13px', padding: '0.2rem 0.65rem' }}>
+                {filteredUserSummaries.length}
+              </span>
+              {(userSearch || (userOrgFilter && userOrgFilter !== 'all') || regDateFrom || regDateTo) && (
+                <span style={{ fontSize: 'var(--text-xs, 12px)', color: 'var(--color-muted-fg, #6b7280)', fontWeight: 400 }}>
+                  (filtered from {userSummaries.length} total)
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="admin-table-container">
@@ -855,7 +1382,7 @@ const AdminDashboard = () => {
               <div className="coming-soon">
                 <PeopleAltIcon />
                 <h3>No users found</h3>
-                <p>Try adjusting your search criteria</p>
+                <p>Try adjusting your search or filter criteria</p>
               </div>
             ) : (
               <table className="admin-table">
@@ -863,10 +1390,10 @@ const AdminDashboard = () => {
                   <tr>
                     <th>User</th>
                     <th>Organization</th>
+                    <th>Registered</th>
                     <th>Attempts</th>
                     <th>Completed</th>
-                    <th>Score</th>
-                    <th>Total Score</th>
+                    <th>Score / Total Score</th>
                     <th>Last Activity</th>
                   </tr>
                 </thead>
@@ -888,16 +1415,20 @@ const AdminDashboard = () => {
                         </div>
                       </td>
                       <td><span className="badge badge--primary">{u.organization}</span></td>
+                      <td style={{ fontSize: 'var(--text-sm)' }}>
+                        {u.registeredAt ? formatDate(u.registeredAt) : '—'}
+                      </td>
                       <td style={{ fontWeight: 600 }}>{u.attempts}</td>
                       <td>{u.completed}/{u.attempts}</td>
                       <td>
                         {u.scoreCount > 0 ? (
-                          <span className={`badge ${scoreBadgeClass(u.avgScore)}`}>{u.obtainedMarks}</span>
+                          <span className={`badge ${scoreBadgeClass(u.avgScore)}`}>
+                            {u.obtainedMarks} / {u.totalMarks}
+                          </span>
                         ) : (
                           <span style={{ color: 'var(--color-muted-fg)', fontStyle: 'italic', fontSize: 'var(--text-sm)' }}>—</span>
                         )}
                       </td>
-                      <td>{u.scoreCount > 0 ? u.totalMarks : '—'}</td>
                       <td style={{ fontSize: 'var(--text-sm)' }}>{u.lastActivity ? formatDate(u.lastActivity) : '—'}</td>
                     </tr>
                   ))}
@@ -975,7 +1506,10 @@ const AdminDashboard = () => {
                 <PeopleAltIcon />
                 <div>
                   <span>{selectedUser.name}</span>
-                  <div className="admin-modal__subtitle">{selectedUser.email} · {selectedUser.organization}</div>
+                  <div className="admin-modal__subtitle">
+                    {selectedUser.email} · {selectedUser.organization}
+                    {selectedUser.registeredAt && ` · Registered: ${formatDate(selectedUser.registeredAt)}`}
+                  </div>
                 </div>
               </div>
               <button
@@ -997,12 +1531,10 @@ const AdminDashboard = () => {
                   <div className="admin-user-stat__label">Completed</div>
                 </div>
                 <div className="admin-user-stat">
-                  <div className="admin-user-stat__value">{selectedUser.scoreCount > 0 ? selectedUser.obtainedMarks : '—'}</div>
-                  <div className="admin-user-stat__label">Score</div>
-                </div>
-                <div className="admin-user-stat">
-                  <div className="admin-user-stat__value">{selectedUser.scoreCount > 0 ? selectedUser.totalMarks : '—'}</div>
-                  <div className="admin-user-stat__label">Total Score</div>
+                  <div className="admin-user-stat__value">
+                    {selectedUser.scoreCount > 0 ? `${selectedUser.obtainedMarks} / ${selectedUser.totalMarks}` : '—'}
+                  </div>
+                  <div className="admin-user-stat__label">Score / Total Score</div>
                 </div>
               </div>
 
@@ -1024,20 +1556,20 @@ const AdminDashboard = () => {
                         <td style={{ fontWeight: 600 }}>{r.quiz?.name || 'Unknown'}</td>
                         <td><span className="badge badge--primary">{r.profile?.name || 'Unknown'}</span></td>
                         <td>
-                          {r.completed_at ? (
+                          {isAttemptCompleted(r) ? (
                             <span className={`badge ${scoreBadgeClass(r.score || 0)}`}>{r.score || 0}%</span>
                           ) : (
                             <span style={{ color: 'var(--color-muted-fg)', fontStyle: 'italic', fontSize: 'var(--text-sm)' }}>Pending</span>
                           )}
                         </td>
                         <td>
-                          {r.completed_at ? (
+                          {isAttemptCompleted(r) ? (
                             <span className="badge badge--success">Completed</span>
                           ) : (
                             <span className="badge badge--warning">In Progress</span>
                           )}
                         </td>
-                        <td style={{ fontSize: 'var(--text-sm)' }}>{r.completed_at ? formatDate(r.completed_at) : '—'}</td>
+                        <td style={{ fontSize: 'var(--text-sm)' }}>{isAttemptCompleted(r) ? formatDate(r.completed_at || r.updated_at) : '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1182,15 +1714,201 @@ const AdminDashboard = () => {
       )}
 
       {tab === 3 && (() => {
-        const incompleteAttempts = enrichedAttempts.filter(a => !a.completed_at && a.status !== 'completed')
+        const rawIncomplete = deduplicatedAttempts.filter(a => !isAttemptCompleted(a))
+
+        const filteredIncomplete = rawIncomplete.filter(attempt => {
+          // Search query matching user name, email, quiz name, profile name, or organization
+          if (incompleteSearch.trim()) {
+            const query = incompleteSearch.toLowerCase()
+            const userName = (attempt.user?.name || '').toLowerCase()
+            const userEmail = (attempt.user?.email || '').toLowerCase()
+            const quizName = (attempt.quiz?.name || '').toLowerCase()
+            const profileName = (attempt.profile?.name || '').toLowerCase()
+            const orgName = (attempt.user?.organization || attempt.organization_name || '').toLowerCase()
+
+            const matchesSearch =
+              userName.includes(query) ||
+              userEmail.includes(query) ||
+              quizName.includes(query) ||
+              profileName.includes(query) ||
+              orgName.includes(query)
+
+            if (!matchesSearch) return false
+          }
+
+          // Organization filter
+          if (incompleteOrgFilter && incompleteOrgFilter !== 'all') {
+            const orgName = attempt.user?.organization || attempt.organization_name || 'Individual'
+            if (orgName.toLowerCase() !== incompleteOrgFilter.toLowerCase()) return false
+          }
+
+          // Date range filter
+          const dateVal = attempt.started_at || attempt.updated_at
+          if (incompleteDateFrom && dateVal) {
+            if (new Date(dateVal) < new Date(incompleteDateFrom)) return false
+          }
+          if (incompleteDateTo && dateVal) {
+            const endDate = new Date(incompleteDateTo)
+            endDate.setHours(23, 59, 59, 999)
+            if (new Date(dateVal) > endDate) return false
+          }
+
+          return true
+        })
+
+        // Sorting logic
+        filteredIncomplete.sort((a, b) => {
+          const dateA = new Date(a.updated_at || a.started_at || 0).getTime()
+          const dateB = new Date(b.updated_at || b.started_at || 0).getTime()
+
+          const answersA = a.answers && typeof a.answers === 'object' ? Object.keys(a.answers).length : 0
+          const totalQA = a.total_questions || 0
+          const pctA = totalQA > 0 ? (answersA / totalQA) : 0
+
+          const answersB = b.answers && typeof b.answers === 'object' ? Object.keys(b.answers).length : 0
+          const totalQB = b.total_questions || 0
+          const pctB = totalQB > 0 ? (answersB / totalQB) : 0
+
+          if (incompleteSortBy === 'date_desc') return dateB - dateA
+          if (incompleteSortBy === 'date_asc') return dateA - dateB
+          if (incompleteSortBy === 'completion_desc') return pctB - pctA
+          if (incompleteSortBy === 'completion_asc') return pctA - pctB
+          if (incompleteSortBy === 'name_asc') return (a.user?.name || '').localeCompare(b.user?.name || '')
+          if (incompleteSortBy === 'quiz_asc') return (a.quiz?.name || '').localeCompare(b.quiz?.name || '')
+
+          return dateB - dateA
+        })
+
         return (
           <>
+            <div className="admin-controls" style={{ flexWrap: 'wrap', gap: 'var(--space-3, 12px)' }}>
+              <div className="admin-search" style={{ minWidth: '220px', flex: 1 }}>
+                <SearchIcon style={{ color: 'var(--color-muted)' }} />
+                <input 
+                  type="text" 
+                  placeholder="Search by user, email, quiz, profile, or organization..." 
+                  value={incompleteSearch}
+                  onChange={(e) => setIncompleteSearch(e.target.value)}
+                />
+              </div>
+              
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 'var(--text-xs, 12px)', fontWeight: 600, color: 'var(--color-muted-fg, #6b7280)' }}>Started Date:</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span style={{ fontSize: 'var(--text-xs, 12px)', color: 'var(--color-muted-fg, #6b7280)' }}>From</span>
+                  <input
+                    type="date"
+                    style={{
+                      padding: '0.4rem 0.6rem',
+                      borderRadius: 'var(--radius-md, 8px)',
+                      border: '1px solid var(--color-border, #e5e7eb)',
+                      backgroundColor: 'var(--color-surface, #ffffff)',
+                      fontSize: 'var(--text-sm, 13px)',
+                      color: 'var(--color-fg, #1f2937)',
+                      cursor: 'pointer'
+                    }}
+                    value={incompleteDateFrom}
+                    onChange={(e) => setIncompleteDateFrom(e.target.value)}
+                    title="Filter started date from"
+                  />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span style={{ fontSize: 'var(--text-xs, 12px)', color: 'var(--color-muted-fg, #6b7280)' }}>To</span>
+                  <input
+                    type="date"
+                    style={{
+                      padding: '0.4rem 0.6rem',
+                      borderRadius: 'var(--radius-md, 8px)',
+                      border: '1px solid var(--color-border, #e5e7eb)',
+                      backgroundColor: 'var(--color-surface, #ffffff)',
+                      fontSize: 'var(--text-sm, 13px)',
+                      color: 'var(--color-fg, #1f2937)',
+                      cursor: 'pointer'
+                    }}
+                    value={incompleteDateTo}
+                    onChange={(e) => setIncompleteDateTo(e.target.value)}
+                    title="Filter started date to"
+                  />
+                </div>
+                {(incompleteDateFrom || incompleteDateTo) && (
+                  <button
+                    className="btn btn--outline"
+                    style={{ padding: '0.35rem 0.6rem', fontSize: '12px' }}
+                    onClick={() => { setIncompleteDateFrom(''); setIncompleteDateTo(''); }}
+                    title="Clear date filter"
+                  >
+                    Clear Dates
+                  </button>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <FilterListIcon style={{ color: 'var(--color-muted-fg)', fontSize: '1.2rem' }} />
+                <select
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: 'var(--radius-md, 8px)',
+                    border: '1px solid var(--color-border, #e5e7eb)',
+                    backgroundColor: 'var(--color-surface, #ffffff)',
+                    fontSize: 'var(--text-sm, 14px)',
+                    color: 'var(--color-fg, #1f2937)',
+                    cursor: 'pointer'
+                  }}
+                  value={incompleteOrgFilter}
+                  onChange={(e) => setIncompleteOrgFilter(e.target.value)}
+                >
+                  <option value="all">All Organizations ({availableUserOrgs.length})</option>
+                  {availableUserOrgs.map(org => (
+                    <option key={org} value={org}>{org}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: 'var(--text-sm, 14px)', fontWeight: 600, color: 'var(--color-muted-fg, #6b7280)' }}>Sort:</span>
+                <select
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: 'var(--radius-md, 8px)',
+                    border: '1px solid var(--color-border, #e5e7eb)',
+                    backgroundColor: 'var(--color-surface, #ffffff)',
+                    fontSize: 'var(--text-sm, 14px)',
+                    color: 'var(--color-fg, #1f2937)',
+                    cursor: 'pointer'
+                  }}
+                  value={incompleteSortBy}
+                  onChange={(e) => setIncompleteSortBy(e.target.value)}
+                >
+                  <option value="date_desc">Last Activity (Newest First)</option>
+                  <option value="date_asc">Last Activity (Oldest First)</option>
+                  <option value="completion_desc">Highest Completion % First</option>
+                  <option value="completion_asc">Lowest Completion % First</option>
+                  <option value="name_asc">User Name (A to Z)</option>
+                  <option value="quiz_asc">Quiz Name (A to Z)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: 'var(--space-3, 12px) 0 var(--space-2, 8px) 0' }}>
+              <div style={{ fontSize: 'var(--text-sm, 14px)', fontWeight: 600, color: 'var(--color-fg, #1f2937)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>Incomplete Quizzes:</span>
+                <span className="badge badge--warning" style={{ fontSize: '13px', padding: '0.2rem 0.65rem' }}>
+                  {filteredIncomplete.length}
+                </span>
+                {(incompleteSearch || (incompleteOrgFilter && incompleteOrgFilter !== 'all') || incompleteDateFrom || incompleteDateTo) && (
+                  <span style={{ fontSize: 'var(--text-xs, 12px)', color: 'var(--color-muted-fg, #6b7280)', fontWeight: 400 }}>
+                    (filtered from {rawIncomplete.length} total)
+                  </span>
+                )}
+              </div>
+            </div>
+
             <div className="admin-table-container">
-              {incompleteAttempts.length === 0 ? (
+              {filteredIncomplete.length === 0 ? (
                 <div className="coming-soon">
                   <CheckCircleIcon />
-                  <h3>No incomplete quizzes</h3>
-                  <p>All users have completed their quizzes</p>
+                  <h3>No incomplete quizzes found</h3>
+                  <p>Try adjusting your search or filter criteria</p>
                 </div>
               ) : (
                 <table className="admin-table">
@@ -1206,7 +1924,7 @@ const AdminDashboard = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {incompleteAttempts.map(attempt => {
+                    {filteredIncomplete.map(attempt => {
                       const answersCount = attempt.answers && typeof attempt.answers === 'object'
                         ? Object.keys(attempt.answers).length
                         : 0

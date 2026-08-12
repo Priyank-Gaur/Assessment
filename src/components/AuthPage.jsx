@@ -1,4 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import VisibilityIcon from '@mui/icons-material/Visibility'
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import { LANGUAGES } from '../constants/languages'
 import { sortProfiles } from '../utils/profileOrder'
 import { useLanguage } from '../contexts/LanguageContext'
@@ -223,8 +225,10 @@ function AuthPage() {
         if (response.ok) {
           const data = await response.json()
           setVerifiedOrgName(data.name)
-          if (data.email && !email.trim()) setEmail(data.email)
-          if (data.userName && !userName.trim()) setUserName(data.userName)
+          if (data.flow === 'pre_existing' || (data.email && data.userName)) {
+            if (data.email && !email.trim()) setEmail(data.email)
+            if (data.userName && !userName.trim()) setUserName(data.userName)
+          }
         } else {
           const errData = await response.json()
           setCodeVerificationError(errData.error || 'Invalid user code')
@@ -276,6 +280,23 @@ function AuthPage() {
     }
   }, [error]);
 
+  const errorRef = useRef(null);
+  const codeErrorRef = useRef(null);
+
+  // Auto-scroll to error banner whenever error state changes
+  useEffect(() => {
+    if (error && errorRef.current) {
+      errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [error]);
+
+  // Auto-scroll to code verification error whenever codeVerificationError changes
+  useEffect(() => {
+    if (codeVerificationError && codeErrorRef.current) {
+      codeErrorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [codeVerificationError]);
+
   // Auto-clear success messages after 3 seconds
   useEffect(() => {
     if (success) {
@@ -306,22 +327,41 @@ function AuthPage() {
     
     try {
       if (isSignUp) {
-        // Validate required fields for signup. The company code is optional —
-        // individuals (and anyone without a code) can sign up freely.
-        if (!userName.trim() || !email.trim() || !profile || !password.trim()) {
-          setError('Please fill in your name, email, profile and password.');
+        // Targeted validation checks with clear, specific error messages
+        if (!userName.trim()) {
+          setError(UI_TEXT.enterUserName);
           hasError = true;
-          setLoading(false);
           return;
         }
-        // If a company code was entered, it must resolve to a valid organization.
+        if (!email.trim()) {
+          setError(UI_TEXT.enterEmail);
+          hasError = true;
+          return;
+        }
+        if (!profile || !profile.trim()) {
+          setError(UI_TEXT.selectProfileError);
+          hasError = true;
+          return;
+        }
+        if (!password.trim()) {
+          setError(UI_TEXT.enterPassword);
+          hasError = true;
+          return;
+        }
+        // If company registration is selected, code must be provided and valid
         const isIndividual = registrationType === 'individual';
         const trimmedCode = isIndividual ? '' : onboardingCode.trim();
-        if (trimmedCode && !verifiedOrgName) {
-          setError('The company code entered is not valid. Clear it to sign up individually.');
-          hasError = true;
-          setLoading(false);
-          return;
+        if (registrationType === 'company') {
+          if (!trimmedCode) {
+            setError(UI_TEXT.enterCompanyCodeError);
+            hasError = true;
+            return;
+          }
+          if (!verifiedOrgName) {
+            setError('The company code entered is not valid. Clear it to sign up individually.');
+            hasError = true;
+            return;
+          }
         }
 
         console.log('🚀 Starting signup process...', { email, userName, profile, userRole, organization: verifiedOrgName || 'Individual', userCode: trimmedCode })
@@ -393,6 +433,18 @@ function AuthPage() {
           hasError = true;
         }
       } else {
+        // Sign in validation checks
+        if (!email.trim()) {
+          setError(UI_TEXT.enterEmail);
+          hasError = true;
+          return;
+        }
+        if (!password.trim()) {
+          setError(UI_TEXT.enterPassword);
+          hasError = true;
+          return;
+        }
+
         // Sign in using the API directly
         const response = await fetch(`${API_BASE}/auth/signin`, {
           method: 'POST',

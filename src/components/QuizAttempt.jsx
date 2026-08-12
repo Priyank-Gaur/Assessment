@@ -962,32 +962,34 @@ const QuizAttempt = () => {
                     const startTime = new Date().toISOString();
                     startedAtRef.current = startTime;
                     
-                    // Create an incomplete attempt immediately in database
+                    // Create an incomplete attempt immediately in database if one does not exist yet
                     try {
-                      const newAttemptResponse = await fetch('/api/quiz-attempts', {
-                        method: 'POST',
-                        headers: {
-                          'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                          quiz_id: quizId,
-                          profile_id: quizAssignment?.profile_id || userProfile?.id || `profile_${user?.id}`,
-                          user_id: user?.id,
-                          user_name: user?.user_name || user?.email || null,
-                          user_email: user?.email || null,
-                          score: 0,
-                          total_questions: questions.length,
-                          correct_answers: 0,
-                          started_at: startTime,
-                          status: 'in_progress',
-                          answers: {},
-                          current_question_index: 0
-                        })
-                      });
-                      
-                      if (newAttemptResponse.ok) {
-                        const newAttempt = await newAttemptResponse.json();
-                        setAttempt(newAttempt.id);
+                      if (!attemptIdRef.current) {
+                        const newAttemptResponse = await fetch('/api/quiz-attempts', {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                          },
+                          body: JSON.stringify({
+                            quiz_id: quizId,
+                            profile_id: quizAssignment?.profile_id || userProfile?.id || `profile_${user?.id}`,
+                            user_id: user?.id,
+                            user_name: user?.user_name || user?.email || null,
+                            user_email: user?.email || null,
+                            score: 0,
+                            total_questions: questions.length,
+                            correct_answers: 0,
+                            started_at: startTime,
+                            status: 'in_progress',
+                            answers: {},
+                            current_question_index: 0
+                          })
+                        });
+                        
+                        if (newAttemptResponse.ok) {
+                          const newAttempt = await newAttemptResponse.json();
+                          setAttempt(newAttempt.id);
+                        }
                       }
                     } catch (e) {
                       console.error('Error creating quiz attempt:', e);

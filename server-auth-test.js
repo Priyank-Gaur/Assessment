@@ -779,36 +779,70 @@ app.post('/api/auth/signup', async (req, res) => {
   let organizationName = 'Individual';
 
   if (code) {
-    if (!mockData.employees) {
-      mockData.employees = [];
-    }
-    const emp = mockData.employees.find(e => e.code === code.toUpperCase());
-    if (!emp) {
-      return res.status(400).json({ error: 'Invalid company code' });
-    }
-    if (emp.email.toLowerCase() !== email.trim().toLowerCase()) {
-      let metadata = emp.metadata || {};
-      if (typeof metadata === 'string') {
-        try { metadata = JSON.parse(metadata); } catch { metadata = {}; }
-      }
-      metadata.personal_email = email.trim();
-      emp.metadata = metadata;
-      emp.registered = 1;
-      saveData(mockData);
-    }
+    if (!mockData.employees) mockData.employees = [];
+    if (!mockData.generated_codes) mockData.generated_codes = [];
 
-    if (!mockData.organizations) {
-      mockData.organizations = [];
+    // 1. First check pre-existing single-employee code
+    let emp = mockData.employees.find(e => e.code === code);
+    if (emp) {
+      if (emp.email.toLowerCase() !== email.trim().toLowerCase()) {
+        let metadata = emp.metadata || {};
+        if (typeof metadata === 'string') {
+          try { metadata = JSON.parse(metadata); } catch { metadata = {}; }
+        }
+        metadata.personal_email = email.trim();
+        emp.metadata = metadata;
+      }
+      emp.registered = 1;
+      const org = mockData.organizations.find(o => o.id === emp.organization_id);
+      if (!org) return res.status(400).json({ error: 'Associated organization not found' });
+      if (org.status !== 'active') return res.status(400).json({ error: 'This organization is currently inactive' });
+      organizationId = org.id;
+      organizationName = org.name;
+    } else {
+      // 2. Check multi-use generated code
+      const genCode = mockData.generated_codes.find(gc => gc.code === code);
+      if (!genCode) {
+        return res.status(400).json({ error: 'Invalid company code' });
+      }
+      if (genCode.status !== 'active') {
+        return res.status(400).json({ error: 'This sign-up code is currently inactive' });
+      }
+      if (genCode.signups_used >= genCode.max_signups) {
+        return res.status(400).json({ error: 'This sign-up code has reached its maximum allowed signups.' });
+      }
+
+      const org = mockData.organizations.find(o => o.id === genCode.organization_id);
+      if (!org) return res.status(400).json({ error: 'Associated organization not found' });
+      if (org.status !== 'active') return res.status(400).json({ error: 'This organization is currently inactive' });
+
+      // Increment multi-use code count
+      genCode.signups_used = (genCode.signups_used || 0) + 1;
+      if (genCode.signups_used >= genCode.max_signups) {
+        genCode.status = 'depleted';
+      }
+
+      // Generate a UNIQUE personal code for this employee
+      const personalUserCode = generateUniqueEmployeeCode(mockData.employees);
+
+      // Create new Employee Directory record with distinct personal User Code & Common Signup Code
+      const newEmp = {
+        id: String(Date.now()) + Math.random().toString().slice(2, 6),
+        organization_id: org.id,
+        name: targetUserName || email.split('@')[0],
+        email: email.trim(),
+        code: personalUserCode, // Unique personal User Code
+        signup_code: genCode.code, // Common Multi-Use Code used to join
+        registered: 1,
+        metadata: { signup_code: genCode.code },
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      mockData.employees.push(newEmp);
+
+      organizationId = org.id;
+      organizationName = org.name;
     }
-    const org = mockData.organizations.find(o => o.id === emp.organization_id);
-    if (!org) {
-      return res.status(400).json({ error: 'Associated organization not found' });
-    }
-    if (org.status !== 'active') {
-      return res.status(400).json({ error: 'This organization is currently inactive' });
-    }
-    organizationId = org.id;
-    organizationName = org.name;
   }
 
   // Hash password before saving
