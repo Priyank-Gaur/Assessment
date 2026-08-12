@@ -11,9 +11,12 @@ import {
   FileUpload as FileUploadIcon,
   People as PeopleIcon,
   Info as InfoIcon,
-  Warning as WarningIcon
+  Warning as WarningIcon,
+  VpnKey as VpnKeyIcon,
+  ContentCopy as ContentCopyIcon
 } from '@mui/icons-material';
 import * as XLSX from 'xlsx';
+import { codeGenerationApi } from '../services/api';
 
 const OrganizationManager = ({ 
   organizations = [], 
@@ -61,7 +64,7 @@ const OrganizationManager = ({
   const [deletingOrg, setDeletingOrg] = useState(null);
 
   // Employee Directory and Excel Import State
-  const [activeTab, setActiveTab] = useState('details'); // 'details' or 'employees'
+  const [activeTab, setActiveTab] = useState('details'); // 'details', 'employees', or 'codes'
   const [isImportMode, setIsImportMode] = useState(false);
   const [employeesLoading, setEmployeesLoading] = useState(false);
   const [searchEmployeeQuery, setSearchEmployeeQuery] = useState('');
@@ -79,6 +82,79 @@ const OrganizationManager = ({
   const [manualPhone, setManualPhone] = useState('');
   const [manualLocation, setManualLocation] = useState('');
   const [manualError, setManualError] = useState('');
+
+  // Code Generation State
+  const [generatedCodes, setGeneratedCodes] = useState([]);
+  const [codesLoading, setCodesLoading] = useState(false);
+  const [codesError, setCodesError] = useState('');
+  const [codesSuccess, setCodesSuccess] = useState('');
+  const [codeType, setCodeType] = useState('random'); // 'random' | 'custom'
+  const [customCode, setCustomCode] = useState('');
+  const [maxSignups, setMaxSignups] = useState(10);
+  const [creatingCode, setCreatingCode] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(null);
+
+  // Code Generation Handlers
+  const loadGeneratedCodes = async (orgId) => {
+    setCodesLoading(true);
+    setCodesError('');
+    try {
+      const data = await codeGenerationApi.getCodesByOrg(orgId);
+      setGeneratedCodes(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setCodesError(err.message || 'Failed to load codes.');
+    } finally {
+      setCodesLoading(false);
+    }
+  };
+
+  const handleCreateCode = async (e) => {
+    e.preventDefault();
+    if (!viewingOrg) return;
+    if (codeType === 'custom' && !customCode.trim()) {
+      setCodesError('Please enter a custom code.');
+      return;
+    }
+    if (!maxSignups || maxSignups < 1) {
+      setCodesError('Max signups must be at least 1.');
+      return;
+    }
+    setCreatingCode(true);
+    setCodesError('');
+    setCodesSuccess('');
+    try {
+      await codeGenerationApi.createCode(viewingOrg.id, {
+        codeType,
+        customCode: codeType === 'custom' ? customCode.trim().toUpperCase() : undefined,
+        maxSignups: Number(maxSignups),
+      });
+      setCodesSuccess(`Code created successfully!`);
+      setCustomCode('');
+      setMaxSignups(10);
+      setCodeType('random');
+      await loadGeneratedCodes(viewingOrg.id);
+    } catch (err) {
+      setCodesError(err.message || 'Failed to create code.');
+    } finally {
+      setCreatingCode(false);
+    }
+  };
+
+  const handleToggleCodeStatus = async (code) => {
+    const newStatus = code.status === 'active' ? 'inactive' : 'active';
+    try {
+      await codeGenerationApi.updateCodeStatus(viewingOrg.id, code.id, newStatus);
+      setGeneratedCodes(prev => prev.map(c => c.id === code.id ? { ...c, status: newStatus } : c));
+    } catch (err) {
+      setCodesError(err.message || 'Failed to update code status.');
+    }
+  };
+
+  const handleCopyCode = (code) => {
+    navigator.clipboard.writeText(code).catch(() => {});
+    setCopiedCode(code);
+    setTimeout(() => setCopiedCode(null), 2000);
+  };
 
   // Handlers
   const handleAddOrg = async (e) => {
@@ -636,8 +712,8 @@ const OrganizationManager = ({
 
       {/* View Details / Manage Employees Modal */}
       {viewDialogOpen && viewingOrg && (
-        <div className="overlay overlay--visible" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, background: 'rgba(0,0,0,0.6)' }}>
-          <div className="auth-card" style={{ maxWidth: activeTab === 'employees' ? '900px' : '550px', margin: 'var(--space-4)', width: '100%', transition: 'max-width 0.2s ease-in-out' }}>
+        <div className="overlay overlay--visible" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, background: 'rgba(0,0,0,0.6)', padding: 'var(--space-4)' }}>
+          <div className="auth-card" style={{ maxWidth: activeTab === 'details' ? '600px' : '1000px', maxHeight: '88vh', overflowY: 'auto', margin: 0, width: '100%', transition: 'max-width 0.2s ease-in-out' }}>
             {/* Modal Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)' }}>
               <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 700 }}>
@@ -686,9 +762,35 @@ const OrganizationManager = ({
                 <PeopleIcon style={{ width: '16px', height: '16px', marginRight: '6px', verticalAlign: 'middle' }} />
                 Employee Directory ({employees.filter(e => e.organization_id === viewingOrg.id).length})
               </button>
+              <button 
+                type="button"
+                onClick={() => {
+                  setActiveTab('codes');
+                  setIsImportMode(false);
+                  setIsManualAddMode(false);
+                  setCodesError('');
+                  setCodesSuccess('');
+                  loadGeneratedCodes(viewingOrg.id);
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: 'var(--space-2) var(--space-1)',
+                  fontSize: 'var(--text-sm)',
+                  fontWeight: 600,
+                  color: activeTab === 'codes' ? 'var(--color-fg)' : 'var(--color-muted-fg)',
+                  cursor: 'pointer',
+                  borderBottom: '2px solid transparent',
+                  borderBottomColor: activeTab === 'codes' ? 'var(--color-primary)' : 'transparent',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <VpnKeyIcon style={{ width: '16px', height: '16px', marginRight: '6px', verticalAlign: 'middle' }} />
+                Code Generation
+              </button>
             </div>
             
-            {activeTab === 'details' ? (
+            {activeTab === 'details' && (
               /* TAB 1: General Details */
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
                 <div>
@@ -737,7 +839,9 @@ const OrganizationManager = ({
                   </div>
                 </div>
               </div>
-            ) : (
+            )}
+
+            {activeTab === 'employees' && (
               /* TAB 2: Employees Directory & Excel Import */
               <div>
                 {isManualAddMode ? (
@@ -1231,11 +1335,17 @@ const OrganizationManager = ({
                                     <td style={{ padding: 'var(--space-3)', fontWeight: 500 }}>{emp.name}</td>
                                     <td style={{ padding: 'var(--space-3)' }}>{emp.email}</td>
                                     <td style={{ padding: 'var(--space-3)' }}>{emp.personal_email || (emp.metadata && emp.metadata.personal_email) || ''}</td>
-                                    <td style={{ padding: 'var(--space-3)', fontWeight: 600, fontFamily: 'monospace', color: 'var(--color-primary)' }}>{emp.code || '—'}</td>
+                                    <td style={{ padding: 'var(--space-3)' }}>
+                                      {emp.code ? (
+                                        <span style={{ fontWeight: 600, fontFamily: 'monospace', color: 'var(--color-primary)' }}>{emp.code}</span>
+                                      ) : (
+                                        <span className="badge badge--neutral" style={{ fontSize: '11px', fontWeight: 600 }}>Multi-Code</span>
+                                      )}
+                                    </td>
                                     <td style={{ padding: 'var(--space-3)' }}>
                                       <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
                                         {Object.entries(emp.metadata || {})
-                                          .filter(([k]) => k !== 'personal_email')
+                                          .filter(([k]) => k !== 'personal_email' && k !== 'registered_via_multi_use_code')
                                           .map(([k, v]) => (
                                             <span 
                                               key={k} 
@@ -1255,7 +1365,7 @@ const OrganizationManager = ({
                                               {k}: {String(v)}
                                             </span>
                                           ))}
-                                        {Object.keys(emp.metadata || {}).filter(k => k !== 'personal_email').length === 0 && (
+                                        {Object.keys(emp.metadata || {}).filter(k => k !== 'personal_email' && k !== 'registered_via_multi_use_code').length === 0 && (
                                           <span style={{ color: 'var(--color-muted-fg)', fontStyle: 'italic', fontSize: 'var(--text-xs)' }}>None</span>
                                         )}
                                       </div>
@@ -1294,6 +1404,170 @@ const OrganizationManager = ({
                     )}
                   </div>
                 )}
+              </div>
+            )}
+
+            {activeTab === 'codes' && (
+              /* TAB 3: Code Generation */
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+
+                {/* Create Code Form */}
+                <div style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: 'var(--space-4)' }}>
+                  <h4 style={{ fontWeight: 700, fontSize: 'var(--text-md)', margin: '0 0 var(--space-4) 0' }}>Create New Signup Code</h4>
+
+                  {codesError && (
+                    <div style={{ color: 'var(--color-destructive)', fontSize: 'var(--text-xs)', fontWeight: 600, padding: 'var(--space-2) var(--space-3)', background: 'rgba(239,68,68,0.1)', border: '1px solid var(--color-destructive)', borderRadius: 'var(--radius-sm)', marginBottom: 'var(--space-3)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <WarningIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} /> {codesError}
+                    </div>
+                  )}
+                  {codesSuccess && (
+                    <div style={{ color: 'var(--color-success, #16a34a)', fontSize: 'var(--text-xs)', fontWeight: 600, padding: 'var(--space-2) var(--space-3)', background: 'rgba(22,163,74,0.1)', border: '1px solid var(--color-success, #16a34a)', borderRadius: 'var(--radius-sm)', marginBottom: 'var(--space-3)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <CheckCircleIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} /> {codesSuccess}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleCreateCode} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+                    {/* Code Type Toggle */}
+                    <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
+                      {['random', 'custom'].map(t => (
+                        <label key={t} style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontWeight: codeType === t ? 700 : 400, color: codeType === t ? 'var(--color-primary)' : 'var(--color-muted-fg)' }}>
+                          <input
+                            type="radio"
+                            name="codeType"
+                            value={t}
+                            checked={codeType === t}
+                            onChange={() => { setCodeType(t); setCustomCode(''); setCodesError(''); }}
+                            style={{ accentColor: 'var(--color-primary)' }}
+                          />
+                          {t === 'random' ? 'Random Code (auto-generated)' : 'Custom Code (you type it)'}
+                        </label>
+                      ))}
+                    </div>
+
+                    {/* Custom Code Field (conditional) */}
+                    {codeType === 'custom' && (
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Your Custom Code</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          value={customCode}
+                          onChange={e => setCustomCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                          placeholder="e.g. HCL2026"
+                          maxLength={20}
+                          style={{ fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.1em' }}
+                        />
+                        <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-muted-fg)', margin: '4px 0 0' }}>Letters and numbers only. Will be stored in UPPERCASE.</p>
+                      </div>
+                    )}
+
+                    {/* Max Signups */}
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Max Signups Allowed</label>
+                      <input
+                        type="number"
+                        className="form-input"
+                        value={maxSignups}
+                        min={1}
+                        max={10000}
+                        onChange={e => setMaxSignups(e.target.value)}
+                        style={{ maxWidth: '160px' }}
+                      />
+                      <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-muted-fg)', margin: '4px 0 0' }}>How many users can sign up using this code.</p>
+                    </div>
+
+                    <div>
+                      <button type="submit" className="btn btn--primary" disabled={creatingCode}>
+                        {creatingCode ? 'Creating...' : '+ Create Code'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                {/* Codes List */}
+                <div>
+                  <h4 style={{ fontWeight: 700, fontSize: 'var(--text-sm)', margin: '0 0 var(--space-3) 0', color: 'var(--color-muted-fg)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Generated Codes ({generatedCodes.length})
+                  </h4>
+
+                  {codesLoading ? (
+                    <div style={{ textAlign: 'center', padding: 'var(--space-6)', color: 'var(--color-muted-fg)', fontSize: 'var(--text-sm)' }}>Loading codes...</div>
+                  ) : generatedCodes.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: 'var(--space-6)', color: 'var(--color-muted-fg)', fontSize: 'var(--text-sm)', border: '1px dashed var(--color-border)', borderRadius: 'var(--radius-md)' }}>
+                      No codes created yet for this organization.
+                    </div>
+                  ) : (
+                    <div style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', overflowX: 'auto', maxHeight: '320px', overflowY: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 'var(--text-sm)' }}>
+                        <thead style={{ background: 'var(--color-bg)', borderBottom: '1px solid var(--color-border)', position: 'sticky', top: 0, zIndex: 1 }}>
+                          <tr>
+                            <th style={{ padding: 'var(--space-3)', fontWeight: 600 }}>Code</th>
+                            <th style={{ padding: 'var(--space-3)', fontWeight: 600 }}>Type</th>
+                            <th style={{ padding: 'var(--space-3)', fontWeight: 600 }}>Signups Used / Max</th>
+                            <th style={{ padding: 'var(--space-3)', fontWeight: 600 }}>Status</th>
+                            <th style={{ padding: 'var(--space-3)', fontWeight: 600 }}>Created</th>
+                            <th style={{ padding: 'var(--space-3)', fontWeight: 600 }}>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {generatedCodes.map(gc => (
+                            <tr key={gc.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                              <td style={{ padding: 'var(--space-3)' }}>
+                                <span style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--color-primary)', fontSize: 'var(--text-md)', letterSpacing: '0.08em' }}>{gc.code}</span>
+                                <button
+                                  onClick={() => handleCopyCode(gc.code)}
+                                  title="Copy code"
+                                  style={{ background: 'none', border: 'none', cursor: 'pointer', marginLeft: '8px', color: copiedCode === gc.code ? 'var(--color-success, #16a34a)' : 'var(--color-muted-fg)', verticalAlign: 'middle' }}
+                                >
+                                  <ContentCopyIcon style={{ width: '14px', height: '14px' }} />
+                                </button>
+                                {copiedCode === gc.code && <span style={{ fontSize: '10px', color: 'var(--color-success, #16a34a)', marginLeft: '4px' }}>Copied!</span>}
+                              </td>
+                              <td style={{ padding: 'var(--space-3)', textTransform: 'capitalize', color: 'var(--color-muted-fg)' }}>{gc.code_type || gc.codeType || '—'}</td>
+                              <td style={{ padding: 'var(--space-3)' }}>
+                                <span style={{ fontWeight: 600 }}>{gc.signups_used ?? gc.signupsUsed ?? 0}</span>
+                                <span style={{ color: 'var(--color-muted-fg)' }}> / {gc.max_signups ?? gc.maxSignups}</span>
+                                {/* Progress bar */}
+                                <div style={{ height: '4px', background: 'var(--color-border)', borderRadius: '4px', marginTop: '4px', overflow: 'hidden', maxWidth: '120px' }}>
+                                  <div style={{
+                                    height: '100%',
+                                    width: `${Math.min(100, ((gc.signups_used ?? gc.signupsUsed ?? 0) / (gc.max_signups ?? gc.maxSignups)) * 100)}%`,
+                                    background: gc.status === 'depleted' ? 'var(--color-destructive)' : 'var(--color-primary)',
+                                    borderRadius: '4px',
+                                    transition: 'width 0.3s'
+                                  }} />
+                                </div>
+                              </td>
+                              <td style={{ padding: 'var(--space-3)' }}>
+                                <span className={`badge badge--${gc.status === 'active' ? 'success' : gc.status === 'depleted' ? 'warning' : 'error'}`}
+                                  style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', textTransform: 'capitalize' }}
+                                >
+                                  {gc.status === 'active' && <CheckCircleIcon style={{ width: '11px', height: '11px' }} />}
+                                  {gc.status === 'inactive' && <CancelIcon style={{ width: '11px', height: '11px' }} />}
+                                  {gc.status}
+                                </span>
+                              </td>
+                              <td style={{ padding: 'var(--space-3)', color: 'var(--color-muted-fg)', fontSize: 'var(--text-xs)' }}>
+                                {gc.created_at ? new Date(gc.created_at).toLocaleDateString() : '—'}
+                              </td>
+                              <td style={{ padding: 'var(--space-3)' }}>
+                                {gc.status !== 'depleted' && (
+                                  <button
+                                    className={`btn btn--outline`}
+                                    style={{ fontSize: '11px', padding: '4px 10px', color: gc.status === 'active' ? 'var(--color-destructive)' : 'var(--color-success, #16a34a)', borderColor: gc.status === 'active' ? 'var(--color-destructive)' : 'var(--color-success, #16a34a)' }}
+                                    onClick={() => handleToggleCodeStatus(gc)}
+                                  >
+                                    {gc.status === 'active' ? 'Deactivate' : 'Activate'}
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

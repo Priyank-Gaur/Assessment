@@ -101,7 +101,7 @@ const loadImage = (src) =>
   })
 
 const ActiveTracking = () => {
-  const { allQuizAttempts, loadAllQuizAttempts, quizzes, organizations: dbOrganizations, employees, loadEmployees, users } = useDatabase()
+  const { allQuizAttempts, loadAllQuizAttempts, quizzes, organizations: dbOrganizations, employees, loadEmployees, users, packets: dbPackets } = useDatabase()
 
   const currentUser = useMemo(() => {
     try {
@@ -185,11 +185,13 @@ const ActiveTracking = () => {
     const all = (allQuizAttempts || []).map(a => {
       const quiz = (quizzes || []).find(q => String(q.id) === String(a.quiz_id))
       const u = userMap[a.user_id] || null
+      const userProfile = u?.profile || a?.profile?.name || a?.profile || a?.user?.profile || 'Unassigned';
       return {
         ...a,
         score: Number(a.score) || 0,
-        quizName: quiz?.name || 'Unknown Quiz',
+        quizName: quiz?.name || a.quiz_name || a.quiz_title || a.quiz?.name || 'Unknown Quiz',
         employee: u?.user_name || u?.email || `User ${a.user_id || '?'}`,
+        profile: userProfile,
         organization: (u?.organization && u.organization.trim()) || 'Unspecified'
       }
     })
@@ -203,22 +205,6 @@ const ActiveTracking = () => {
     }
     return all;
   }, [allQuizAttempts, quizzes, userMap, currentUser, dbOrganizations])
-
-  // Flatten enriched attempts into a tabular dataset so Detailed Insights can
-  // analyze the live tracking data without requiring a spreadsheet upload.
-  const liveDataset = useMemo(() => ({
-    name: 'Active Tracking data',
-    columns: ['Organization', 'Employee', 'Quiz', 'Score (%)', 'Level', 'Status', 'Completed'],
-    rows: attempts.map(a => ({
-      Organization: a.organization,
-      Employee: a.employee,
-      Quiz: a.quizName,
-      'Score (%)': a.score,
-      Level: scoreBand(a.score),
-      Status: a.completed_at ? 'Completed' : 'In Progress',
-      Completed: a.completed_at ? new Date(a.completed_at).toLocaleDateString('en-US') : ''
-    }))
-  }), [attempts])
 
   // Organizations available in the data (combining database organizations and attempts)
   const organizations = useMemo(() => {
@@ -282,6 +268,155 @@ const ActiveTracking = () => {
       : orgAllAttempts.filter(a => a.quizName === selectedQuiz)),
     [orgAllAttempts, selectedQuiz]
   )
+
+  // Flatten enriched attempts into a tabular dataset so Detailed Insights can
+  // analyze the live tracking data without requiring a spreadsheet upload.
+  const liveDataset = useMemo(() => {
+    const getAttemptPacketMarks = (a) => {
+      let pm = a?.packet_marks;
+      if (!pm) return {};
+      if (typeof pm === 'string') {
+        try { pm = JSON.parse(pm); } catch { return {}; }
+      }
+      if (typeof pm !== 'object') return {};
+      return pm;
+    };
+
+    const getPacketNameAndScore = (pm) => {
+      const result = [];
+      Object.entries(pm).forEach(([key, data]) => {
+        let packetId = (data && typeof data === 'object' && data.id) ? data.id : (data?.packet_id || key);
+        let rawName = (data && typeof data === 'object') ? (data.name || key) : key;
+        let marks = 0;
+        let total = 0;
+        let questions = 0;
+
+        if (data && typeof data === 'object') {
+          marks = Number(data.marks ?? data.score ?? 0);
+          total = Number(data.total ?? 0);
+          questions = Number(data.questions ?? 0);
+        } else if (typeof data === 'number') {
+          marks = data;
+        }
+
+        // Dynamically resolve current packet name from live database packets if available
+        const matchedPacket = (dbPackets || []).find(p => String(p.id) === String(packetId) || String(p.name).trim().toLowerCase() === String(rawName).trim().toLowerCase());
+        const name = matchedPacket?.name || rawName;
+
+        // Only include packets that have actual questions, total marks, or marks scored in this attempt
+        if (name && (total > 0 || questions > 0 || marks > 0)) {
+          result.push({ name, marks, total, questions });
+        }
+      });
+      return result;
+    };
+
+    // Include all attempts across all organizations in Detailed Insights live dataset
+    const targetAttempts = attempts;
+
+    // Group packet names by quiz
+    const quizPacketsMap = {};
+    targetAttempts.forEach(a => {
+      const qName = a.quizName || 'Unknown Quiz';
+      if (!quizPacketsMap[qName]) quizPacketsMap[qName] = new Set();
+      const pm = getAttemptPacketMarks(a);
+      const packets = getPacketNameAndScore(pm);
+      packets.forEach(p => quizPacketsMap[qName].add(p.name));
+    });
+
+    // Identify packet names for the selected quiz (or multi-packet quizzes if 'all')
+    const multiPacketNames = [];
+    if (selectedQuiz !== 'all') {
+      const normSel = String(selectedQuiz || '').trim().toLowerCase();
+      Object.entries(quizPacketsMap).forEach(([qName, pSet]) => {
+        if (String(qName).trim().toLowerCase() === normSel && pSet.size > 1) {
+          pSet.forEach(pName => {
+            if (!multiPacketNames.includes(pName)) {
+              multiPacketNames.push(pName);
+            }
+          });
+        }
+      });
+    } else {
+      Object.entries(quizPacketsMap).forEach(([qName, pSet]) => {
+        if (pSet.size > 1) {
+          pSet.forEach(pName => {
+            if (!multiPacketNames.includes(pName)) {
+              multiPacketNames.push(pName);
+            }
+          });
+        }
+      });
+    }
+
+    const packetColsList = [];
+    const packetColsMap = {};
+
+    multiPacketNames.forEach(pName => {
+      const baseName = pName.replace(/\s+(score|level|label)$/i, '');
+      const scoreHeader = `${baseName} Score`;
+      const levelHeader = `${baseName} Level`;
+      packetColsMap[pName] = { scoreHeader, levelHeader };
+      packetColsList.push(scoreHeader, levelHeader);
+    });
+
+    const columns = [
+      'Organization',
+      'Employee',
+      'Profile',
+      'Quiz',
+      'Score',
+      'Total Score',
+      'Level',
+      ...packetColsList,
+      'Status',
+      'Completed'
+    ];
+
+    const rows = targetAttempts.map(a => {
+      const obtainedScore = attemptMarks(a);
+      const totalScore = attemptMaxMarks(a);
+      const pm = getAttemptPacketMarks(a);
+      const packets = getPacketNameAndScore(pm);
+      const packetDataMap = {};
+      packets.forEach(p => {
+        packetDataMap[p.name] = p;
+      });
+
+      const row = {
+        Organization: a.organization,
+        Employee: a.employee,
+        Profile: a.profile || 'Unassigned',
+        Quiz: a.quizName,
+        Score: obtainedScore,
+        'Total Score': totalScore,
+        Level: scoreBand(a.score),
+        Status: a.completed_at ? 'Completed' : 'In Progress',
+        Completed: a.completed_at ? new Date(a.completed_at).toLocaleDateString('en-US') : ''
+      };
+
+      multiPacketNames.forEach(pName => {
+        const { scoreHeader, levelHeader } = packetColsMap[pName];
+        const pData = packetDataMap[pName];
+        if (pData) {
+          row[scoreHeader] = pData.marks;
+          const pPct = pData.total > 0 ? (pData.marks / pData.total) * 100 : (pData.marks > 0 ? 100 : 0);
+          row[levelHeader] = scoreBand(pPct);
+        } else {
+          row[scoreHeader] = '';
+          row[levelHeader] = '';
+        }
+      });
+
+      return row;
+    });
+
+    return {
+      name: 'Active Tracking data',
+      columns,
+      rows
+    };
+  }, [attempts, selectedQuiz, dbPackets])
 
   // Find current organization object to get its ID
   const currentOrg = useMemo(() => {
