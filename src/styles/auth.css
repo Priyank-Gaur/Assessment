@@ -1,0 +1,732 @@
+/* src/styles/auth.css
+   Sign-in / Sign-up screen. Everything here is scoped under .auth-page so the
+   marketing-style hero can be styled generously without leaking into the app
+   shell. Colours come from the brand tokens in global.css — no new palette. */
+
+.auth-page {
+  /* Local tokens: the frame reuses these for its wash, rails and hairlines. */
+  --auth-frame-radius: 32px;
+  --auth-form-card-radius: 24px;
+  --auth-rail: 1180px;
+  --auth-field-height: 48px;
+
+  min-height: 100vh;
+  /* Vertical rhythm is driven by vh so the hero, the card and the USP strip all
+     fit one screen without scrolling; the px bounds keep it sane at extremes. */
+  padding: clamp(12px, 2vh, 24px) var(--space-6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-bg);
+  background-image:
+    radial-gradient(120% 90% at 12% 0%, #F4EFFF 0%, rgba(244, 239, 255, 0) 60%),
+    radial-gradient(100% 80% at 100% 100%, #EDE5FF 0%, rgba(237, 229, 255, 0) 55%),
+    linear-gradient(160deg, #FBF9FF 0%, #F1EBFF 100%);
+}
+
+/* Rounded panel that holds the hero, the card and the USP strip — the single
+   premium surface everything else sits on. */
+.auth-frame {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  max-width: var(--auth-rail);
+  padding: clamp(18px, 3vh, 40px) clamp(20px, 3vw, 44px);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: var(--auth-frame-radius);
+  background-color: rgba(255, 255, 255, 0.5);
+  background-image: linear-gradient(150deg, rgba(255, 255, 255, 0.78) 0%, rgba(243, 238, 255, 0.62) 100%);
+  box-shadow:
+    0 32px 80px rgba(80, 52, 160, 0.12),
+    0 2px 8px rgba(80, 52, 160, 0.05);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+/* Dot grid in the top-left corner, matching the reference's quiet texture. */
+.auth-frame::before {
+  content: '';
+  position: absolute;
+  top: 28px;
+  left: 28px;
+  width: 132px;
+  height: 132px;
+  background-image: radial-gradient(circle, rgba(142, 102, 241, 0.22) 1.6px, transparent 1.7px);
+  background-size: 16px 16px;
+  -webkit-mask-image: linear-gradient(145deg, #000 0%, transparent 72%);
+  mask-image: linear-gradient(145deg, #000 0%, transparent 72%);
+  pointer-events: none;
+}
+
+/* ---- main split -------------------------------------------------------- */
+.auth-main {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 460px);
+  align-items: center;
+  gap: clamp(24px, 3vw, 48px);
+}
+
+/* ---- hero -------------------------------------------------------------- */
+.auth-hero {
+  position: relative;
+  min-width: 0;
+}
+
+.auth-hero__copy {
+  position: relative;
+  z-index: 2;
+  padding-left: clamp(0px, 2vw, 24px);
+}
+
+.auth-hero__title {
+  margin: 0 0 var(--space-3);
+  /* Sized off both axes so the two headline lines never wrap to three. */
+  font-size: clamp(30px, min(3.6vw, 5.4vh), 54px);
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  color: var(--color-fg);
+  text-wrap: balance;
+}
+
+.auth-hero__title-accent {
+  display: block;
+  color: var(--color-primary);
+}
+
+.auth-hero__subtitle {
+  margin: 0;
+  /* ~2 lines, matching the headline's measure. */
+  max-width: 30ch;
+  font-size: clamp(14px, 1.2vw, 17px);
+  line-height: 1.55;
+  color: var(--color-muted-fg);
+}
+
+/* Stage for the mascot illustration. The artwork already carries its own
+   foliage, clouds and sparkles, so the stage only has to seat it. */
+.auth-hero__stage {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: 100%;
+  margin-top: calc(var(--space-2) * -1);
+}
+
+/* A soft lavender pool under the artwork, so the illustration reads as part of
+   the panel rather than a rectangle dropped on top of it. */
+.auth-hero__stage::after {
+  content: '';
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: 4%;
+  height: 12%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(142, 102, 241, 0.16), rgba(142, 102, 241, 0));
+  pointer-events: none;
+}
+
+.auth-hero__mascot {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: auto;
+  max-width: 100%;
+  /* Height-capped rather than width-capped: the hero must not push the USP
+     strip below the fold on short screens. */
+  height: auto;
+  max-height: min(46vh, 400px);
+  object-fit: contain;
+  /* The artwork ships on a white plate; multiplying drops that plate into the
+     lavender panel without needing a cut-out PNG. */
+  mix-blend-mode: multiply;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* ---- login card -------------------------------------------------------- */
+.auth-form-card {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  padding: clamp(20px, 2.8vh, 34px) clamp(22px, 2.4vw, 36px);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: var(--auth-form-card-radius);
+  background-color: var(--color-surface);
+  box-shadow:
+    0 24px 60px rgba(80, 52, 160, 0.14),
+    0 1px 2px rgba(80, 52, 160, 0.06);
+}
+
+.auth-form-card__brand {
+  display: flex;
+  justify-content: center;
+  margin-bottom: var(--space-3);
+}
+
+.auth-form-card__logo {
+  height: clamp(52px, 7vh, 72px);
+  width: auto;
+  object-fit: contain;
+}
+
+.auth-form-card__title {
+  margin: 0 0 var(--space-4);
+  text-align: center;
+  font-size: clamp(24px, 3.4vh, 32px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--color-fg);
+}
+
+/* ---- tabs -------------------------------------------------------------- */
+.auth-tabs {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.auth-tab {
+  flex: 1;
+  padding: var(--space-3) var(--space-1);
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-muted-fg);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--duration-fast) var(--ease-soft),
+              border-color var(--duration-fast) var(--ease-soft);
+}
+
+.auth-tab:hover {
+  color: var(--color-primary);
+}
+
+.auth-tab:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.auth-tab--active,
+.auth-tab--active:hover {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  font-weight: 700;
+}
+
+/* ---- fields ------------------------------------------------------------ */
+.auth-field {
+  margin-bottom: clamp(12px, 2.2vh, 20px);
+}
+
+.auth-field__label {
+  display: block;
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--color-fg);
+}
+
+/* Wrapper that draws the border/focus ring, so the icon chip and the reveal
+   button can sit inside a single visually continuous control. */
+.auth-field__control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--auth-field-height);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-input);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface);
+  transition: border-color var(--duration-fast) var(--ease-soft),
+              box-shadow var(--duration-fast) var(--ease-soft);
+}
+
+.auth-field__control:hover {
+  border-color: var(--color-ring);
+}
+
+.auth-field__control:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-focus);
+}
+
+.auth-field__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-secondary-bg);
+  color: var(--color-primary);
+}
+
+.auth-field__icon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.auth-input {
+  flex: 1;
+  min-width: 0;
+  height: var(--auth-field-height);
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: var(--text-base);
+  color: var(--color-fg);
+}
+
+.auth-input::placeholder {
+  color: var(--color-muted);
+}
+
+.auth-input:focus {
+  outline: none;
+}
+
+/* Native select needs its own padding/arrow treatment. */
+.auth-select {
+  flex: 1;
+  min-width: 0;
+  height: var(--auth-field-height);
+  padding: 0 var(--space-6) 0 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: var(--text-base);
+  color: var(--color-fg);
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238E66F1' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 2px center;
+  background-size: 16px 16px;
+}
+
+.auth-select:focus {
+  outline: none;
+}
+
+.auth-select:disabled {
+  color: var(--color-muted-fg);
+  cursor: not-allowed;
+}
+
+.auth-reveal {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-muted-fg);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-soft),
+              background-color var(--duration-fast) var(--ease-soft);
+}
+
+.auth-reveal:hover {
+  color: var(--color-primary);
+  background-color: var(--color-secondary-bg);
+}
+
+.auth-reveal:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 1px;
+}
+
+.auth-reveal svg {
+  width: 19px;
+  height: 19px;
+}
+
+.auth-field__hint {
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--color-muted-fg);
+}
+
+.auth-field__hint--success {
+  color: var(--color-success);
+  font-weight: 600;
+}
+
+.auth-field__hint--error {
+  color: var(--color-destructive);
+  font-weight: 600;
+}
+
+/* The radio group is a fieldset for semantics; strip the UA chrome so it
+   matches the surrounding fields. */
+.auth-fieldset {
+  min-width: 0;
+  padding: 0;
+  border: none;
+}
+
+.auth-fieldset > .auth-field__label {
+  padding: 0;
+}
+
+/* Company codes are issued uppercase and compared uppercase. */
+.auth-input--code {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* ---- register-as choice ------------------------------------------------ */
+.auth-choices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.auth-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-input);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-fg);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-soft),
+              background-color var(--duration-fast) var(--ease-soft);
+}
+
+.auth-choice:hover {
+  border-color: var(--color-ring);
+}
+
+.auth-choice--selected {
+  border-color: var(--color-primary);
+  background-color: var(--color-secondary-bg);
+}
+
+.auth-choice input {
+  accent-color: var(--color-primary);
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+/* ---- submit ------------------------------------------------------------ */
+.auth-submit {
+  width: 100%;
+  min-height: 50px;
+  padding: var(--space-3) var(--space-5);
+  border: none;
+  border-radius: var(--radius-md);
+  background-image: var(--gradient-brand);
+  font-family: inherit;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--color-primary-fg);
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(117, 64, 236, 0.32);
+  transition: transform var(--duration-fast) var(--ease-soft),
+              box-shadow var(--duration-fast) var(--ease-soft),
+              filter var(--duration-fast) var(--ease-soft);
+}
+
+.auth-submit:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 32px rgba(117, 64, 236, 0.38);
+  filter: brightness(1.05);
+}
+
+.auth-submit:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 8px 18px rgba(117, 64, 236, 0.3);
+}
+
+.auth-submit:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 3px;
+}
+
+.auth-submit:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.auth-footnote {
+  margin: var(--space-4) 0 0;
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--color-muted-fg);
+}
+
+.auth-link {
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 700;
+  color: var(--color-primary);
+  cursor: pointer;
+  text-underline-offset: 3px;
+}
+
+.auth-link:hover {
+  text-decoration: underline;
+}
+
+.auth-link:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ---- messages ---------------------------------------------------------- */
+.auth-alert {
+  margin-bottom: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-fg);
+  background-color: var(--color-muted-bg);
+}
+
+.auth-alert--error {
+  border-color: var(--color-destructive);
+  background-color: rgba(240, 76, 90, 0.1);
+  color: var(--color-destructive);
+}
+
+.auth-alert--success {
+  border-color: var(--color-primary);
+  background-color: var(--color-secondary-bg);
+  color: var(--color-accent-text);
+}
+
+.auth-alert--info {
+  border-color: var(--color-accent);
+  background-color: var(--color-secondary-bg);
+  color: var(--color-accent-text);
+}
+
+.auth-note {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background-color: var(--color-secondary-bg);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-accent-text);
+}
+
+/* ---- USP strip --------------------------------------------------------- */
+.auth-usps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(10px, 1.4vw, 18px);
+  margin: clamp(16px, 2.6vh, 32px) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.usp-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: clamp(14px, 2vh, 22px) clamp(16px, 1.8vw, 24px);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: var(--radius-lg);
+  background-color: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 10px 26px rgba(80, 52, 160, 0.08);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: transform var(--duration-base) var(--ease-soft),
+              box-shadow var(--duration-base) var(--ease-soft),
+              border-color var(--duration-base) var(--ease-soft);
+}
+
+.usp-card:hover {
+  transform: translateY(-6px);
+  border-color: rgba(142, 102, 241, 0.4);
+  box-shadow: 0 20px 38px rgba(80, 52, 160, 0.16);
+}
+
+.usp-card__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: var(--space-3);
+  border-radius: var(--radius-full);
+  background-color: var(--color-secondary-bg);
+  color: var(--color-primary);
+  transition: transform var(--duration-base) var(--ease-soft),
+              background-color var(--duration-base) var(--ease-soft);
+}
+
+.usp-card__icon svg {
+  width: 21px;
+  height: 21px;
+}
+
+.usp-card:hover .usp-card__icon {
+  transform: scale(1.08);
+  background-color: var(--color-accent);
+}
+
+.usp-card__title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-base);
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--color-fg);
+}
+
+.usp-card__text {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-muted-fg);
+}
+
+/* ---- responsive -------------------------------------------------------- */
+@media (max-width: 1080px) {
+  .auth-main {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+  }
+
+  .auth-hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    text-align: center;
+  }
+
+  .auth-hero__copy {
+    padding-left: 0;
+  }
+
+  .auth-hero__subtitle {
+    max-width: 44ch;
+    margin-inline: auto;
+  }
+
+  .auth-hero__stage {
+    width: min(100%, 520px);
+  }
+
+  /* Stacked, the card owns the fold — keep the art from crowding it out. */
+  .auth-hero__mascot {
+    max-height: min(32vh, 290px);
+  }
+
+  .auth-form-card {
+    max-width: 480px;
+  }
+}
+
+@media (max-width: 900px) {
+  .auth-usps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .auth-page {
+    padding: var(--space-3);
+  }
+
+  .auth-frame {
+    padding: var(--space-5) var(--space-4);
+    border-radius: 24px;
+  }
+
+  .auth-frame::before {
+    display: none;
+  }
+
+  .auth-tabs {
+    gap: 0;
+  }
+
+  .auth-tab {
+    font-size: var(--text-xs);
+    padding: var(--space-3) 2px;
+  }
+}
+
+@media (max-width: 520px) {
+  .auth-usps {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .usp-card:hover,
+  .auth-submit:hover:not(:disabled) {
+    transform: none;
+  }
+}
+
+/* ---- dark theme -------------------------------------------------------- */
+[data-theme="dark"] .auth-page,
+body.dark .auth-page {
+  background-image:
+    radial-gradient(120% 90% at 12% 0%, #241B45 0%, rgba(36, 27, 69, 0) 60%),
+    radial-gradient(100% 80% at 100% 100%, #1F1839 0%, rgba(31, 24, 57, 0) 55%),
+    linear-gradient(160deg, #16142A 0%, #1B1633 100%);
+}
+
+[data-theme="dark"] .auth-frame,
+body.dark .auth-frame {
+  border-color: rgba(255, 255, 255, 0.08);
+  background-color: rgba(29, 27, 48, 0.72);
+  background-image: linear-gradient(150deg, rgba(45, 38, 78, 0.8) 0%, rgba(29, 27, 48, 0.7) 100%);
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="dark"] .auth-form-card,
+body.dark .auth-form-card {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .usp-card,
+body.dark .usp-card {
+  border-color: rgba(255, 255, 255, 0.08);
+  background-color: rgba(35, 32, 58, 0.75);
+}
+
+/* Multiply blends the artwork's white plate into a *light* panel; on the dark
+   panel it would black out, so screen it back in instead. */
+[data-theme="dark"] .auth-hero__mascot,
+body.dark .auth-hero__mascot {
+  mix-blend-mode: screen;
+  filter: brightness(0.92);
+}
