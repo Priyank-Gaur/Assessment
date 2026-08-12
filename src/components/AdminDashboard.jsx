@@ -72,6 +72,11 @@ const AdminDashboard = () => {
   const [attemptDateTo, setAttemptDateTo] = useState('')
   const [attemptOrgFilter, setAttemptOrgFilter] = useState('all')
   const [attemptSortBy, setAttemptSortBy] = useState('date_desc')
+  const [incompleteSearch, setIncompleteSearch] = useState('')
+  const [incompleteOrgFilter, setIncompleteOrgFilter] = useState('all')
+  const [incompleteDateFrom, setIncompleteDateFrom] = useState('')
+  const [incompleteDateTo, setIncompleteDateTo] = useState('')
+  const [incompleteSortBy, setIncompleteSortBy] = useState('date_desc')
 
   const {
     allQuizAttempts,
@@ -1709,15 +1714,201 @@ const AdminDashboard = () => {
       )}
 
       {tab === 3 && (() => {
-        const incompleteAttempts = deduplicatedAttempts.filter(a => !isAttemptCompleted(a))
+        const rawIncomplete = deduplicatedAttempts.filter(a => !isAttemptCompleted(a))
+
+        const filteredIncomplete = rawIncomplete.filter(attempt => {
+          // Search query matching user name, email, quiz name, profile name, or organization
+          if (incompleteSearch.trim()) {
+            const query = incompleteSearch.toLowerCase()
+            const userName = (attempt.user?.name || '').toLowerCase()
+            const userEmail = (attempt.user?.email || '').toLowerCase()
+            const quizName = (attempt.quiz?.name || '').toLowerCase()
+            const profileName = (attempt.profile?.name || '').toLowerCase()
+            const orgName = (attempt.user?.organization || attempt.organization_name || '').toLowerCase()
+
+            const matchesSearch =
+              userName.includes(query) ||
+              userEmail.includes(query) ||
+              quizName.includes(query) ||
+              profileName.includes(query) ||
+              orgName.includes(query)
+
+            if (!matchesSearch) return false
+          }
+
+          // Organization filter
+          if (incompleteOrgFilter && incompleteOrgFilter !== 'all') {
+            const orgName = attempt.user?.organization || attempt.organization_name || 'Individual'
+            if (orgName.toLowerCase() !== incompleteOrgFilter.toLowerCase()) return false
+          }
+
+          // Date range filter
+          const dateVal = attempt.started_at || attempt.updated_at
+          if (incompleteDateFrom && dateVal) {
+            if (new Date(dateVal) < new Date(incompleteDateFrom)) return false
+          }
+          if (incompleteDateTo && dateVal) {
+            const endDate = new Date(incompleteDateTo)
+            endDate.setHours(23, 59, 59, 999)
+            if (new Date(dateVal) > endDate) return false
+          }
+
+          return true
+        })
+
+        // Sorting logic
+        filteredIncomplete.sort((a, b) => {
+          const dateA = new Date(a.updated_at || a.started_at || 0).getTime()
+          const dateB = new Date(b.updated_at || b.started_at || 0).getTime()
+
+          const answersA = a.answers && typeof a.answers === 'object' ? Object.keys(a.answers).length : 0
+          const totalQA = a.total_questions || 0
+          const pctA = totalQA > 0 ? (answersA / totalQA) : 0
+
+          const answersB = b.answers && typeof b.answers === 'object' ? Object.keys(b.answers).length : 0
+          const totalQB = b.total_questions || 0
+          const pctB = totalQB > 0 ? (answersB / totalQB) : 0
+
+          if (incompleteSortBy === 'date_desc') return dateB - dateA
+          if (incompleteSortBy === 'date_asc') return dateA - dateB
+          if (incompleteSortBy === 'completion_desc') return pctB - pctA
+          if (incompleteSortBy === 'completion_asc') return pctA - pctB
+          if (incompleteSortBy === 'name_asc') return (a.user?.name || '').localeCompare(b.user?.name || '')
+          if (incompleteSortBy === 'quiz_asc') return (a.quiz?.name || '').localeCompare(b.quiz?.name || '')
+
+          return dateB - dateA
+        })
+
         return (
           <>
+            <div className="admin-controls" style={{ flexWrap: 'wrap', gap: 'var(--space-3, 12px)' }}>
+              <div className="admin-search" style={{ minWidth: '220px', flex: 1 }}>
+                <SearchIcon style={{ color: 'var(--color-muted)' }} />
+                <input 
+                  type="text" 
+                  placeholder="Search by user, email, quiz, profile, or organization..." 
+                  value={incompleteSearch}
+                  onChange={(e) => setIncompleteSearch(e.target.value)}
+                />
+              </div>
+              
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 'var(--text-xs, 12px)', fontWeight: 600, color: 'var(--color-muted-fg, #6b7280)' }}>Started Date:</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span style={{ fontSize: 'var(--text-xs, 12px)', color: 'var(--color-muted-fg, #6b7280)' }}>From</span>
+                  <input
+                    type="date"
+                    style={{
+                      padding: '0.4rem 0.6rem',
+                      borderRadius: 'var(--radius-md, 8px)',
+                      border: '1px solid var(--color-border, #e5e7eb)',
+                      backgroundColor: 'var(--color-surface, #ffffff)',
+                      fontSize: 'var(--text-sm, 13px)',
+                      color: 'var(--color-fg, #1f2937)',
+                      cursor: 'pointer'
+                    }}
+                    value={incompleteDateFrom}
+                    onChange={(e) => setIncompleteDateFrom(e.target.value)}
+                    title="Filter started date from"
+                  />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span style={{ fontSize: 'var(--text-xs, 12px)', color: 'var(--color-muted-fg, #6b7280)' }}>To</span>
+                  <input
+                    type="date"
+                    style={{
+                      padding: '0.4rem 0.6rem',
+                      borderRadius: 'var(--radius-md, 8px)',
+                      border: '1px solid var(--color-border, #e5e7eb)',
+                      backgroundColor: 'var(--color-surface, #ffffff)',
+                      fontSize: 'var(--text-sm, 13px)',
+                      color: 'var(--color-fg, #1f2937)',
+                      cursor: 'pointer'
+                    }}
+                    value={incompleteDateTo}
+                    onChange={(e) => setIncompleteDateTo(e.target.value)}
+                    title="Filter started date to"
+                  />
+                </div>
+                {(incompleteDateFrom || incompleteDateTo) && (
+                  <button
+                    className="btn btn--outline"
+                    style={{ padding: '0.35rem 0.6rem', fontSize: '12px' }}
+                    onClick={() => { setIncompleteDateFrom(''); setIncompleteDateTo(''); }}
+                    title="Clear date filter"
+                  >
+                    Clear Dates
+                  </button>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <FilterListIcon style={{ color: 'var(--color-muted-fg)', fontSize: '1.2rem' }} />
+                <select
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: 'var(--radius-md, 8px)',
+                    border: '1px solid var(--color-border, #e5e7eb)',
+                    backgroundColor: 'var(--color-surface, #ffffff)',
+                    fontSize: 'var(--text-sm, 14px)',
+                    color: 'var(--color-fg, #1f2937)',
+                    cursor: 'pointer'
+                  }}
+                  value={incompleteOrgFilter}
+                  onChange={(e) => setIncompleteOrgFilter(e.target.value)}
+                >
+                  <option value="all">All Organizations ({availableUserOrgs.length})</option>
+                  {availableUserOrgs.map(org => (
+                    <option key={org} value={org}>{org}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: 'var(--text-sm, 14px)', fontWeight: 600, color: 'var(--color-muted-fg, #6b7280)' }}>Sort:</span>
+                <select
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: 'var(--radius-md, 8px)',
+                    border: '1px solid var(--color-border, #e5e7eb)',
+                    backgroundColor: 'var(--color-surface, #ffffff)',
+                    fontSize: 'var(--text-sm, 14px)',
+                    color: 'var(--color-fg, #1f2937)',
+                    cursor: 'pointer'
+                  }}
+                  value={incompleteSortBy}
+                  onChange={(e) => setIncompleteSortBy(e.target.value)}
+                >
+                  <option value="date_desc">Last Activity (Newest First)</option>
+                  <option value="date_asc">Last Activity (Oldest First)</option>
+                  <option value="completion_desc">Highest Completion % First</option>
+                  <option value="completion_asc">Lowest Completion % First</option>
+                  <option value="name_asc">User Name (A to Z)</option>
+                  <option value="quiz_asc">Quiz Name (A to Z)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: 'var(--space-3, 12px) 0 var(--space-2, 8px) 0' }}>
+              <div style={{ fontSize: 'var(--text-sm, 14px)', fontWeight: 600, color: 'var(--color-fg, #1f2937)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>Incomplete Quizzes:</span>
+                <span className="badge badge--warning" style={{ fontSize: '13px', padding: '0.2rem 0.65rem' }}>
+                  {filteredIncomplete.length}
+                </span>
+                {(incompleteSearch || (incompleteOrgFilter && incompleteOrgFilter !== 'all') || incompleteDateFrom || incompleteDateTo) && (
+                  <span style={{ fontSize: 'var(--text-xs, 12px)', color: 'var(--color-muted-fg, #6b7280)', fontWeight: 400 }}>
+                    (filtered from {rawIncomplete.length} total)
+                  </span>
+                )}
+              </div>
+            </div>
+
             <div className="admin-table-container">
-              {incompleteAttempts.length === 0 ? (
+              {filteredIncomplete.length === 0 ? (
                 <div className="coming-soon">
                   <CheckCircleIcon />
-                  <h3>No incomplete quizzes</h3>
-                  <p>All users have completed their quizzes</p>
+                  <h3>No incomplete quizzes found</h3>
+                  <p>Try adjusting your search or filter criteria</p>
                 </div>
               ) : (
                 <table className="admin-table">
@@ -1733,7 +1924,7 @@ const AdminDashboard = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {incompleteAttempts.map(attempt => {
+                    {filteredIncomplete.map(attempt => {
                       const answersCount = attempt.answers && typeof attempt.answers === 'object'
                         ? Object.keys(attempt.answers).length
                         : 0

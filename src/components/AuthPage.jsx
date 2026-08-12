@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import { LANGUAGES } from '../constants/languages'
@@ -41,6 +41,11 @@ const UI_TEXT = {
   checkEmail: 'Check your email!',
   resetSentPre: "We've sent a password reset link to",
   resetSentPost: 'Click the link in the email to reset your password.',
+  enterUserName: 'Please enter your User Name.',
+  enterEmail: 'Please enter your Email address.',
+  selectProfileError: 'Please select a profile to continue.',
+  enterPassword: 'Please enter your password.',
+  enterCompanyCodeError: 'Please enter your company code.',
 };
 
 function AuthPage() {
@@ -91,8 +96,10 @@ function AuthPage() {
         if (response.ok) {
           const data = await response.json()
           setVerifiedOrgName(data.name)
-          if (data.email && !email.trim()) setEmail(data.email)
-          if (data.userName && !userName.trim()) setUserName(data.userName)
+          if (data.flow === 'pre_existing' || (data.email && data.userName)) {
+            if (data.email && !email.trim()) setEmail(data.email)
+            if (data.userName && !userName.trim()) setUserName(data.userName)
+          }
         } else {
           const errData = await response.json()
           setCodeVerificationError(errData.error || 'Invalid user code')
@@ -144,6 +151,23 @@ function AuthPage() {
     }
   }, [error]);
 
+  const errorRef = useRef(null);
+  const codeErrorRef = useRef(null);
+
+  // Auto-scroll to error banner whenever error state changes
+  useEffect(() => {
+    if (error && errorRef.current) {
+      errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [error]);
+
+  // Auto-scroll to code verification error whenever codeVerificationError changes
+  useEffect(() => {
+    if (codeVerificationError && codeErrorRef.current) {
+      codeErrorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [codeVerificationError]);
+
   // Auto-clear success messages after 3 seconds
   useEffect(() => {
     if (success) {
@@ -174,22 +198,41 @@ function AuthPage() {
     
     try {
       if (isSignUp) {
-        // Validate required fields for signup. The company code is optional —
-        // individuals (and anyone without a code) can sign up freely.
-        if (!userName.trim() || !email.trim() || !profile || !password.trim()) {
-          setError('Please fill in your name, email, profile and password.');
+        // Targeted validation checks with clear, specific error messages
+        if (!userName.trim()) {
+          setError(UI_TEXT.enterUserName);
           hasError = true;
-          setLoading(false);
           return;
         }
-        // If a company code was entered, it must resolve to a valid organization.
+        if (!email.trim()) {
+          setError(UI_TEXT.enterEmail);
+          hasError = true;
+          return;
+        }
+        if (!profile || !profile.trim()) {
+          setError(UI_TEXT.selectProfileError);
+          hasError = true;
+          return;
+        }
+        if (!password.trim()) {
+          setError(UI_TEXT.enterPassword);
+          hasError = true;
+          return;
+        }
+        // If company registration is selected, code must be provided and valid
         const isIndividual = registrationType === 'individual';
         const trimmedCode = isIndividual ? '' : onboardingCode.trim();
-        if (trimmedCode && !verifiedOrgName) {
-          setError('The company code entered is not valid. Clear it to sign up individually.');
-          hasError = true;
-          setLoading(false);
-          return;
+        if (registrationType === 'company') {
+          if (!trimmedCode) {
+            setError(UI_TEXT.enterCompanyCodeError);
+            hasError = true;
+            return;
+          }
+          if (!verifiedOrgName) {
+            setError('The company code entered is not valid. Clear it to sign up individually.');
+            hasError = true;
+            return;
+          }
         }
 
         console.log('🚀 Starting signup process...', { email, userName, profile, userRole, organization: verifiedOrgName || 'Individual', userCode: trimmedCode })
@@ -261,6 +304,18 @@ function AuthPage() {
           hasError = true;
         }
       } else {
+        // Sign in validation checks
+        if (!email.trim()) {
+          setError(UI_TEXT.enterEmail);
+          hasError = true;
+          return;
+        }
+        if (!password.trim()) {
+          setError(UI_TEXT.enterPassword);
+          hasError = true;
+          return;
+        }
+
         // Sign in using the API directly
         const response = await fetch(`${API_BASE}/auth/signin`, {
           method: 'POST',
@@ -391,8 +446,12 @@ function AuthPage() {
         
         {/* Forgot Password Tab */}
         {tab === 2 ? (
-          <form onSubmit={(e) => { 
+          <form noValidate onSubmit={(e) => { 
             e.preventDefault(); 
+            if (!email.trim()) {
+              setError(UI_TEXT.enterEmail);
+              return;
+            }
             setLoading(true);
             setError('');
             setSuccess('');
@@ -423,8 +482,8 @@ function AuthPage() {
           </form>
         ) : (
           // Login / Sign Up Tabs
-          <form onSubmit={(e) => { e.preventDefault(); handleAuth(tab === 1); }}>
-            {error && <div className="alert alert--error">{tx(error)}</div>}
+          <form noValidate onSubmit={(e) => { e.preventDefault(); handleAuth(tab === 1); }}>
+            {error && <div ref={errorRef} className="alert alert--error">{tx(error)}</div>}
             {success && <div className="alert alert--success" style={{ backgroundColor: '#E5DFFF', color: '#191928', border: '1px solid #8E66F1', padding: 'var(--space-4)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-4)' }}>{tx(success)}</div>}
 
             {tab === 1 && (
@@ -559,7 +618,7 @@ function AuthPage() {
                         </span>
                       )}
                       {codeVerificationError && (
-                        <span style={{ color: 'var(--color-destructive)', fontWeight: 600 }}>
+                        <span ref={codeErrorRef} style={{ color: 'var(--color-destructive)', fontWeight: 600, display: 'block' }}>
                           ❌ {tx(codeVerificationError)}
                         </span>
                       )}
@@ -611,16 +670,7 @@ function AuthPage() {
               type="submit"
               className="btn btn--primary"
               style={{ width: '100%', marginBottom: 'var(--space-4)' }}
-              disabled={
-                loading ||
-                (tab === 1 && (
-                  !userName.trim() ||
-                  !email.trim() ||
-                  !profile ||
-                  !password.trim() ||
-                  (registrationType === 'company' && (!onboardingCode.trim() || !verifiedOrgName))
-                ))
-              }
+              disabled={loading}
             >
               {loading ? (tab === 1 ? t('signingUp') : t('loggingIn')) : (tab === 0 ? t('login') : t('signUp'))}
             </button>

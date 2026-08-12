@@ -167,6 +167,30 @@ export const employeeApi = {
   }
 };
 
+// Code Generation API
+export const codeGenerationApi = {
+  // Create a new custom or random multi-use signup code for an org
+  async createCode(orgId, { codeType, customCode, maxSignups }) {
+    return await apiCall(`/organizations/${orgId}/codes`, {
+      method: 'POST',
+      body: JSON.stringify({ codeType, customCode, maxSignups }),
+    });
+  },
+
+  // List all generated codes for an org
+  async getCodesByOrg(orgId) {
+    return await apiCall(`/organizations/${orgId}/codes`);
+  },
+
+  // Activate or deactivate a generated code
+  async updateCodeStatus(orgId, codeId, status) {
+    return await apiCall(`/organizations/${orgId}/codes/${codeId}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ status }),
+    });
+  },
+};
+
 // Packet API
 export const packetApi = {
   async getAllPackets() {

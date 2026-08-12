@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useCallback } from 'react'
+import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import * as XLSX from 'xlsx'
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
@@ -62,7 +62,17 @@ const MAX_CATEGORICAL_CARDINALITY = 50
 const MAX_CHART_CATEGORIES = 15
 const TABLE_PAGE_SIZE = 10
 
-const isBlank = (v) => v === null || v === undefined || String(v).trim() === ''
+const isBlank = (v) => {
+  if (v === null || v === undefined) return true
+  const str = String(v).trim()
+  return str === '' || str === '—' || str === '-' || str.toLowerCase() === 'n/a' || str.toLowerCase() === 'null' || str.toLowerCase() === 'undefined'
+}
+
+const isNonBlankValue = (val, type) => {
+  if (isBlank(val)) return false
+  if (type === 'numeric') return toNumber(val) !== null
+  return true
+}
 
 const toNumber = (v) => {
   if (typeof v === 'number') return Number.isFinite(v) ? v : null
@@ -588,6 +598,15 @@ const DetailedInsights = ({ onBack, liveDataset }) => {
   // ── Dynamic widgets ────────────────────────────────────────
   const categoricalCols = useMemo(() => columns.filter(c => c.type === 'categorical'), [columns])
   const numericCols = useMemo(() => columns.filter(c => c.type === 'numeric'), [columns])
+  
+  // Filter sidebar columns: hide excessive category level filters (e.g. packet level headers ending with " Level" except main "Level")
+  const displayFilterColumns = useMemo(() => {
+    return columns.filter(c => {
+      if (c.type === 'numeric') return false;
+      if (c.name.endsWith(' Level') && c.name !== 'Level') return false;
+      return true;
+    });
+  }, [columns])
   // Anything that isn't a measure can be a grouping dimension (high-cardinality
   // columns like names stay usable thanks to the Top-N control on each chart).
   const dimensionCols = useMemo(() => columns.filter(c => c.type !== 'numeric'), [columns])
@@ -722,6 +741,25 @@ const DetailedInsights = ({ onBack, liveDataset }) => {
     return { title, column: drill.column, rows: selected, stats }
   }, [drill, filteredRows, insightMetric])
 
+  // Filter out any columns that are completely empty across all filtered rows
+  const activeColumns = useMemo(() => {
+    if (!filteredRows || !filteredRows.length) return columns;
+    return columns.filter(c =>
+      filteredRows.some(r => isNonBlankValue(r[c.name], c.type))
+    );
+  }, [columns, filteredRows]);
+
+  const activeNumericCols = useMemo(() => activeColumns.filter(c => c.type === 'numeric'), [activeColumns]);
+  const activeDimensionCols = useMemo(() => activeColumns.filter(c => c.type !== 'numeric'), [activeColumns]);
+
+  // Active non-empty columns for the drilled records modal table
+  const drillVisibleColumns = useMemo(() => {
+    if (!drillResult || !drillResult.rows || !drillResult.rows.length) return activeColumns;
+    return activeColumns.filter(c =>
+      drillResult.rows.some(r => isNonBlankValue(r[c.name], c.type))
+    );
+  }, [activeColumns, drillResult]);
+
   // ── KPI summary ────────────────────────────────────────────
   const summary = useMemo(() => ({
     total: displayRows.length,
@@ -739,7 +777,7 @@ const DetailedInsights = ({ onBack, liveDataset }) => {
 
   // Export the filtered, view-aware dataset as a flat CSV.
   const exportCSV = () => {
-    const headers = columns.map(c => c.name)
+    const headers = activeColumns.map(c => c.name)
     const body = filteredRows.map(r => headers.map(h => r[h]))
     const csv = [headers, ...body].map(r => r.map(csvCell).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
@@ -752,7 +790,7 @@ const DetailedInsights = ({ onBack, liveDataset }) => {
   }
 
   const exportExcel = () => {
-    const headers = columns.map(c => c.name)
+    const headers = activeColumns.map(c => c.name)
     const body = filteredRows.map(r => headers.map(h => r[h]))
     const ws = XLSX.utils.aoa_to_sheet([headers, ...body]);
     ws['!cols'] = headers.map((colName) => {
@@ -1388,7 +1426,7 @@ const DetailedInsights = ({ onBack, liveDataset }) => {
 
             {showFilters && (
               <div className="di-filters">
-                {columns.map(({ name, type }) => (
+                {displayFilterColumns.map(({ name, type }) => (
                   <div key={name} className="di-filter">
                     <div className="di-filter__label">
                       {name} <span className="di-filter__type">{type}</span>
@@ -1408,26 +1446,6 @@ const DetailedInsights = ({ onBack, liveDataset }) => {
                             </button>
                           )
                         })}
-                      </div>
-                    )}
-
-                    {type === 'numeric' && (
-                      <div className="di-range">
-                        <input
-                          type="number"
-                          className="di-input"
-                          placeholder={`min (${columnMeta[name]?.min ?? ''})`}
-                          value={filters[name]?.min ?? ''}
-                          onChange={(e) => setNumericFilter(name, 'min', e.target.value)}
-                        />
-                        <span className="di-range__sep">–</span>
-                        <input
-                          type="number"
-                          className="di-input"
-                          placeholder={`max (${columnMeta[name]?.max ?? ''})`}
-                          value={filters[name]?.max ?? ''}
-                          onChange={(e) => setNumericFilter(name, 'max', e.target.value)}
-                        />
                       </div>
                     )}
 
@@ -1545,9 +1563,9 @@ const DetailedInsights = ({ onBack, liveDataset }) => {
                     key={w.id}
                     widget={w}
                     rows={filteredRows}
-                    columns={columns}
-                    dimensionCols={dimensionCols}
-                    numericCols={numericCols}
+                    columns={activeColumns}
+                    dimensionCols={activeDimensionCols}
+                    numericCols={activeNumericCols}
                     identityColumn={identityColumn}
                     onUpdate={updateWidget}
                     onRemove={removeWidget}
@@ -1601,12 +1619,12 @@ const DetailedInsights = ({ onBack, liveDataset }) => {
               <div className="di-table-wrap di-modal__table">
                 <table className="di-table">
                   <thead>
-                    <tr>{columns.map(c => <th key={c.name}>{c.name}</th>)}</tr>
+                    <tr>{drillVisibleColumns.map(c => <th key={c.name}>{c.name}</th>)}</tr>
                   </thead>
                   <tbody>
                     {drillResult.rows.map((r, i) => (
                       <tr key={i}>
-                        {columns.map(c => <td key={c.name}>{String(r[c.name] ?? '')}</td>)}
+                        {drillVisibleColumns.map(c => <td key={c.name}>{String(r[c.name] ?? '')}</td>)}
                       </tr>
                     ))}
                   </tbody>
@@ -1730,11 +1748,14 @@ const ChartWidget = ({ widget, rows, columns, dimensionCols, numericCols, identi
   const isMeanSpread = type === 'meanspread'   // average bar per group + individual points
 
   // The assessments a multi-score chart spans: the widget's stored list, else
-  // every numeric column. Filtered to columns that still exist as numbers.
+  // every numeric column. Filtered to columns that still exist as numbers and have valid values.
   const scoreList = useMemo(() => {
     const list = (widget.scores && widget.scores.length) ? widget.scores : numericCols.map(c => c.name)
-    return list.filter(n => numericCols.some(c => c.name === n))
-  }, [widget.scores, numericCols])
+    return list.filter(n =>
+      numericCols.some(c => c.name === n) &&
+      rows.some(r => isNonBlankValue(r[n], 'numeric'))
+    )
+  }, [widget.scores, numericCols, rows])
 
   // Lift a clicked category/range up to the drill-down modal.
   const drillCategory = (d) => {
@@ -1782,16 +1803,17 @@ const ChartWidget = ({ widget, rows, columns, dimensionCols, numericCols, identi
         if (n !== null) groups[key].values.push(n)
       }
     })
-    const arr = Object.entries(groups).map(([name, g]) => {
-      let value
-      if (measure === 'count') value = g.count
-      else if (g.values.length === 0) value = 0
-      else if (agg === 'sum') value = g.values.reduce((s, n) => s + n, 0)
-      else if (agg === 'min') value = Math.min(...g.values)
-      else if (agg === 'max') value = Math.max(...g.values)
-      else value = g.values.reduce((s, n) => s + n, 0) / g.values.length
-      return { name, value: round1(value), count: g.count, ts: g.ts }
-    })
+    const arr = Object.entries(groups)
+      .filter(([_, g]) => measure === 'count' || g.values.length > 0)
+      .map(([name, g]) => {
+        let value
+        if (measure === 'count') value = g.count
+        else if (agg === 'sum') value = g.values.reduce((s, n) => s + n, 0)
+        else if (agg === 'min') value = Math.min(...g.values)
+        else if (agg === 'max') value = Math.max(...g.values)
+        else value = g.values.reduce((s, n) => s + n, 0) / g.values.length
+        return { name, value: round1(value), count: g.count, ts: g.ts }
+      })
     if (isDate) arr.sort((a, b) => a.ts - b.ts)
     // `order: 'asc'` surfaces the lowest performers (bottom of the ranking);
     // everything else ranks highest-first (top performers / largest groups).
@@ -1959,11 +1981,14 @@ const ChartWidget = ({ widget, rows, columns, dimensionCols, numericCols, identi
         if (n !== null) { g[k].sums[s] = (g[k].sums[s] || 0) + n; g[k].cnts[s] = (g[k].cnts[s] || 0) + 1 }
       })
     })
-    const data = Object.entries(g).map(([name, v]) => {
-      const o = { name, __count: v.__count }
-      keys.forEach(s => { o[s] = v.cnts[s] ? round1(v.sums[s] / v.cnts[s]) : 0 })
-      return o
-    }).sort((a, b) => b.__count - a.__count)
+    const data = Object.entries(g)
+      .filter(([_, v]) => keys.some(s => v.cnts[s] > 0))
+      .map(([name, v]) => {
+        const o = { name, __count: v.__count }
+        keys.forEach(s => { o[s] = v.cnts[s] ? round1(v.sums[s] / v.cnts[s]) : 0 })
+        return o
+      })
+      .sort((a, b) => b.__count - a.__count)
     return { data, keys }
   }, [isGrouped, rows, dimension, scoreList])
 
@@ -1993,13 +2018,15 @@ const ChartWidget = ({ widget, rows, columns, dimensionCols, numericCols, identi
   // out-of-5/10/100 ceiling) so different-scaled assessments share one axis.
   const radar = useMemo(() => {
     if (!isRadar) return []
-    return scoreList.map(s => {
-      const nums = rows.map(r => toNumber(r[s])).filter(n => n !== null)
-      if (!nums.length) return { assessment: s, value: 0, raw: 0 }
-      const avg = nums.reduce((a, b) => a + b, 0) / nums.length
-      const scale = detectScale(Math.max(...nums))
-      return { assessment: s, value: round1((avg / scale) * 100), raw: round1(avg) }
-    })
+    return scoreList
+      .map(s => {
+        const nums = rows.map(r => toNumber(r[s])).filter(n => n !== null)
+        if (!nums.length) return null
+        const avg = nums.reduce((a, b) => a + b, 0) / nums.length
+        const scale = detectScale(Math.max(...nums))
+        return { assessment: s, value: round1((avg / scale) * 100), raw: round1(avg) }
+      })
+      .filter(Boolean)
   }, [isRadar, rows, scoreList])
 
   // ── Range: min / average / max of a score per category, with response count ─
@@ -3316,13 +3343,20 @@ const ChartWidget = ({ widget, rows, columns, dimensionCols, numericCols, identi
 
 // ── Paginated data table with CSV export ──────────────────────
 const DataTable = ({ columns, rows, fileName, anonymized, page, onPage }) => {
+  const visibleColumns = useMemo(() => {
+    if (!rows || !rows.length) return columns;
+    return columns.filter(c =>
+      rows.some(r => isNonBlankValue(r[c.name], c.type))
+    );
+  }, [columns, rows]);
+
   const totalPages = Math.max(1, Math.ceil(rows.length / TABLE_PAGE_SIZE))
   const safePage = Math.min(page, totalPages - 1)
   const start = safePage * TABLE_PAGE_SIZE
   const pageRows = rows.slice(start, start + TABLE_PAGE_SIZE)
 
   const exportCSV = () => {
-    const headers = columns.map(c => c.name)
+    const headers = visibleColumns.map(c => c.name)
     const body = rows.map(r => headers.map(h => r[h]))
     const csv = [headers, ...body].map(r => r.map(csvCell).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
@@ -3335,7 +3369,7 @@ const DataTable = ({ columns, rows, fileName, anonymized, page, onPage }) => {
   }
 
   const exportExcel = () => {
-    const headers = columns.map(c => c.name)
+    const headers = visibleColumns.map(c => c.name)
     const body = rows.map(r => headers.map(h => r[h]))
     const ws = XLSX.utils.aoa_to_sheet([headers, ...body]);
     ws['!cols'] = headers.map((colName) => {
@@ -3372,12 +3406,12 @@ const DataTable = ({ columns, rows, fileName, anonymized, page, onPage }) => {
           <div className="di-table-wrap">
             <table className="di-table">
               <thead>
-                <tr>{columns.map(c => <th key={c.name}>{c.name}</th>)}</tr>
+                <tr>{visibleColumns.map(c => <th key={c.name}>{c.name}</th>)}</tr>
               </thead>
               <tbody>
                 {pageRows.map((r, i) => (
                   <tr key={start + i}>
-                    {columns.map(c => <td key={c.name}>{String(r[c.name] ?? '')}</td>)}
+                    {visibleColumns.map(c => <td key={c.name}>{String(r[c.name] ?? '')}</td>)}
                   </tr>
                 ))}
               </tbody>
