@@ -178,7 +178,9 @@
   .overlay--visible { display: none; }
 }
 
-/* Auth Page specific base classes */
+/* Centring shell shared by the standalone auth-ish screens (password reset,
+   the org/profile gates). The main sign-in screen has its own layout in
+   auth.css and does not use these. */
 .auth-layout {
   min-height: 100vh;
   display: flex;

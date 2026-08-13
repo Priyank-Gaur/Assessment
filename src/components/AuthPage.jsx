@@ -8,6 +8,10 @@ import { useTranslatedContent } from '../hooks/useTranslatedContent'
 
 const API_BASE = 'https://happimynd.com/new_api';
 
+// Current Happi Mynd brand logo, served from the marketing site so the auth
+// screen always shows the same mark as the rest of the platform.
+const LOGO_SRC = 'https://happimynd.com/assets/Frontend/images/happimynd_logo.png';
+
 // Product name. Deliberately kept out of UI_TEXT: it's a brand name, so it must
 // render identically in every language rather than being machine-translated.
 const APP_TITLE = 'Quizzard'
@@ -15,6 +19,9 @@ const APP_TITLE = 'Quizzard'
 // Static copy for the auth screen. Everything here is translated into the
 // user's selected language so the whole Sign-Up / Login flow is localized.
 const UI_TEXT = {
+  heroTitleTop: 'Insights That',
+  heroTitleBottom: 'Inspire Growth.',
+  heroSubtitle: 'Quick, engaging quizzes to help you discover more about yourself.',
   login: 'Login',
   signUp: 'Sign Up',
   forgotPassword: 'Forgot Password',
@@ -41,12 +48,134 @@ const UI_TEXT = {
   checkEmail: 'Check your email!',
   resetSentPre: "We've sent a password reset link to",
   resetSentPost: 'Click the link in the email to reset your password.',
-  enterUserName: 'Please enter your User Name.',
-  enterEmail: 'Please enter your Email address.',
-  selectProfileError: 'Please select a profile to continue.',
-  enterPassword: 'Please enter your password.',
-  enterCompanyCodeError: 'Please enter your company code.',
+  emailPlaceholder: 'Enter your email',
+  passwordPlaceholder: 'Enter your password',
+  namePlaceholder: 'Enter your name',
+  showPassword: 'Show password',
+  hidePassword: 'Hide password',
+  newHere: 'New here?',
+  uspLanguagesTitle: '35+ Languages',
+  uspLanguagesText: "Take quizzes in a language you're comfortable with.",
+  uspQuizzesTitle: 'Under 60 Seconds',
+  uspQuizzesText: 'Quick quizzes designed to fit into your day.',
+  uspProfilesTitle: '25+ Lifestyle Quizzes',
+  uspProfilesText: 'Explore different aspects of your personality and life.',
+  uspReportsTitle: 'Instant Insights',
+  uspReportsText: 'See your results as soon as you complete a quiz.',
 };
+
+// Line icons for the USP strip. Inline (rather than an icon package) so they
+// inherit currentColor and stay crisp on the gradient tiles.
+const iconProps = {
+  width: 20,
+  height: 20,
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 2,
+  strokeLinecap: 'round',
+  strokeLinejoin: 'round',
+  'aria-hidden': true,
+};
+
+const GlobeIcon = () => (
+  <svg {...iconProps}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18" />
+  </svg>
+);
+
+const BoltIcon = () => (
+  <svg {...iconProps}>
+    <path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z" />
+  </svg>
+);
+
+const TargetIcon = () => (
+  <svg {...iconProps}>
+    <circle cx="12" cy="12" r="9" />
+    <circle cx="12" cy="12" r="5" />
+    <circle cx="12" cy="12" r="1.5" />
+  </svg>
+);
+
+const ChartIcon = () => (
+  <svg {...iconProps}>
+    <path d="M3 21h18" />
+    <path d="M7 21V11M12 21V4M17 21v-6" />
+  </svg>
+);
+
+// Field affordances: a tinted chip inside each input, plus the password reveal.
+const UserIcon = () => (
+  <svg {...iconProps}>
+    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+    <circle cx="12" cy="7" r="4" />
+  </svg>
+);
+
+const MailIcon = () => (
+  <svg {...iconProps}>
+    <rect x="3" y="5" width="18" height="14" rx="2.5" />
+    <path d="m3.5 7 8.5 6 8.5-6" />
+  </svg>
+);
+
+const LockIcon = () => (
+  <svg {...iconProps}>
+    <rect x="4" y="10.5" width="16" height="10.5" rx="2.5" />
+    <path d="M8 10.5V7a4 4 0 0 1 8 0v3.5" />
+  </svg>
+);
+
+const LanguageIcon = () => (
+  <svg {...iconProps}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18" />
+  </svg>
+);
+
+const BuildingIcon = () => (
+  <svg {...iconProps}>
+    <rect x="4" y="3" width="16" height="18" rx="2" />
+    <path d="M9 8h1M14 8h1M9 12h1M14 12h1M10 21v-4h4v4" />
+  </svg>
+);
+
+const EyeIcon = () => (
+  <svg {...iconProps}>
+    <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+);
+
+const EyeOffIcon = () => (
+  <svg {...iconProps}>
+    <path d="M10.6 6.2A9.9 9.9 0 0 1 12 6c6.4 0 10 6 10 6a17.6 17.6 0 0 1-3.4 4.1M6.6 7.9A17.6 17.6 0 0 0 2 12s3.6 6 10 6a9.7 9.7 0 0 0 4.1-.9" />
+    <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+    <path d="m3 3 18 18" />
+  </svg>
+);
+
+// Value props shown under the sign-in block. Titles carry the headline number,
+// so the description stays a single sentence that translates cleanly.
+// Tab order drives both the header strip and every `tab === n` branch below.
+const TAB_LOGIN = 0;
+const TAB_SIGNUP = 1;
+const TAB_FORGOT = 2;
+
+const TABS = [
+  { id: TAB_LOGIN, label: 'login' },
+  { id: TAB_SIGNUP, label: 'signUp' },
+  { id: TAB_FORGOT, label: 'forgotPassword' },
+];
+
+const USP_CARDS = [
+  { id: 'languages', icon: <GlobeIcon />, title: 'uspLanguagesTitle', text: 'uspLanguagesText' },
+  { id: 'quizzes', icon: <BoltIcon />, title: 'uspQuizzesTitle', text: 'uspQuizzesText' },
+  { id: 'profiles', icon: <TargetIcon />, title: 'uspProfilesTitle', text: 'uspProfilesText' },
+  { id: 'reports', icon: <ChartIcon />, title: 'uspReportsTitle', text: 'uspReportsText' },
+];
 
 function AuthPage() {
   const { language, setLanguage } = useLanguage()
@@ -384,6 +513,7 @@ function AuthPage() {
     if (newValue !== tab) {
       setEmail('');
       setPassword('');
+      setShowPassword(false);
       setUserName('');
       setProfile('');
       setRegistrationType(newValue === 1 ? 'individual' : '');
@@ -407,281 +537,341 @@ function AuthPage() {
   ].filter((s) => typeof s === 'string' && s !== '');
   const { tx } = useTranslatedContent(authTexts);
   const t = (key) => tx(UI_TEXT[key]);
-
   return (
-    <div className="auth-layout">
-      <div className="auth-card">
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 'var(--space-4)' }}>
-          <img 
-            src="https://happimynd.com/assets/Frontend/images/happimynd_logo.png"
-            alt="HappiMynd Logo"
-            style={{ height: '60px', width: 'auto', objectFit: 'contain' }}
-          />
-        </div>
-        
-        <h2 style={{ textAlign: 'center', marginBottom: 'var(--space-6)', fontWeight: 700, fontSize: 'var(--text-2xl)', color: 'var(--color-fg)' }}>
-          {APP_TITLE}
-        </h2>
-        
-        <div style={{ display: 'flex', borderBottom: '1px solid var(--color-border)', marginBottom: 'var(--space-6)', gap: 'var(--space-2)' }}>
-          <button 
-            style={{ flex: 1, padding: 'var(--space-2)', borderBottom: tab === 0 ? '2px solid var(--color-primary)' : '2px solid transparent', background: 'none', borderTop: 'none', borderLeft: 'none', borderRight: 'none', cursor: 'pointer', fontWeight: tab === 0 ? 700 : 500, color: tab === 0 ? 'var(--color-primary)' : 'var(--color-muted-fg)' }}
-            onClick={() => handleTabChange(0)}
-          >
-            {t('login')}
-          </button>
-          <button 
-            style={{ flex: 1, padding: 'var(--space-2)', borderBottom: tab === 1 ? '2px solid var(--color-primary)' : '2px solid transparent', background: 'none', borderTop: 'none', borderLeft: 'none', borderRight: 'none', cursor: 'pointer', fontWeight: tab === 1 ? 700 : 500, color: tab === 1 ? 'var(--color-primary)' : 'var(--color-muted-fg)' }}
-            onClick={() => handleTabChange(1)}
-          >
-            {t('signUp')}
-          </button>
-          <button 
-            style={{ flex: 1, padding: 'var(--space-2)', borderBottom: tab === 2 ? '2px solid var(--color-primary)' : '2px solid transparent', background: 'none', borderTop: 'none', borderLeft: 'none', borderRight: 'none', cursor: 'pointer', fontWeight: tab === 2 ? 700 : 500, color: tab === 2 ? 'var(--color-primary)' : 'var(--color-muted-fg)' }}
-            onClick={() => handleTabChange(2)}
-          >
-            {t('forgotPassword')}
-          </button>
-        </div>
-        
-        {/* Forgot Password Tab */}
-        {tab === 2 ? (
-          <form noValidate onSubmit={(e) => { 
-            e.preventDefault(); 
-            if (!email.trim()) {
-              setError(UI_TEXT.enterEmail);
-              return;
-            }
-            setLoading(true);
-            setError('');
-            setSuccess('');
-            setResetEmailSent(true);
-            setLoading(false);
-          }}>
-            <div className="form-group">
-              <label className="form-label">{t('email')}</label>
-              <input
-                className="form-input"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
+    <div className="auth-page">
+      <div className="auth-frame">
+        <div className="auth-main">
+          {/* ---- hero ------------------------------------------------- */}
+          <section className="auth-hero">
+            <div className="auth-hero__copy">
+              <h1 className="auth-hero__title">
+                {t('heroTitleTop')}
+                <span className="auth-hero__title-accent">{t('heroTitleBottom')}</span>
+              </h1>
+              <p className="auth-hero__subtitle">{t('heroSubtitle')}</p>
             </div>
 
-            {error && <div className="alert alert--error">{tx(error)}</div>}
-            {success && <div className="alert alert--success" style={{ backgroundColor: '#E5DFFF', color: '#191928', border: '1px solid #8E66F1', padding: 'var(--space-4)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-4)' }}>{tx(success)}</div>}
+            {/* Illustration only — the copy above already carries the message,
+                so it stays out of the accessibility tree. */}
+            <div className="auth-hero__stage">
+              <img
+                className="auth-hero__mascot"
+                src="/happimynd_mascot_laptop.png"
+                alt=""
+                aria-hidden="true"
+              />
+            </div>
+          </section>
 
-            {resetEmailSent && (
-              <div className="alert" style={{ backgroundColor: '#E5DFFF', color: '#191928', border: '1px solid #E5DFFF', padding: 'var(--space-4)', borderRadius: 'var(--radius-md)' }}>
-                <strong>{t('checkEmail')}</strong> {t('resetSentPre')} {email}. {t('resetSentPost')}
-              </div>
-            )}
+          {/* ---- login card ------------------------------------------- */}
+          <div className="auth-form-card">
+            <div className="auth-form-card__brand">
+              <img className="auth-form-card__logo" src={LOGO_SRC} alt="Happi Mynd" />
+            </div>
 
-            <button type="submit" className="btn btn--primary" style={{ width: '100%' }}>{t('resetPassword')}</button>
-          </form>
-        ) : (
-          // Login / Sign Up Tabs
-          <form noValidate onSubmit={(e) => { e.preventDefault(); handleAuth(tab === 1); }}>
-            {error && <div ref={errorRef} className="alert alert--error">{tx(error)}</div>}
-            {success && <div className="alert alert--success" style={{ backgroundColor: '#E5DFFF', color: '#191928', border: '1px solid #8E66F1', padding: 'var(--space-4)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-4)' }}>{tx(success)}</div>}
+            {/* h2: the hero headline is the page's h1. */}
+            <h2 className="auth-form-card__title">{APP_TITLE}</h2>
 
-            {tab === 1 && (
-              <div className="form-group">
-                <label className="form-label">{t('userName')}</label>
-                <input
-                  className="form-input"
-                  type="text"
-                  value={userName}
-                  onChange={(e) => setUserName(e.target.value)}
-                  required
-                />
-              </div>
-            )}
+            <div className="auth-tabs" role="tablist" aria-label={APP_TITLE}>
+              {TABS.map(({ id, label }) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  id={`auth-tab-${id}`}
+                  aria-selected={tab === id}
+                  aria-controls="auth-tabpanel"
+                  className={`auth-tab${tab === id ? ' auth-tab--active' : ''}`}
+                  onClick={() => handleTabChange(id)}
+                >
+                  {t(label)}
+                </button>
+              ))}
+            </div>
 
-            {tab === 1 && (
-              <div className="form-group">
-                <label className="form-label">{t('preferredLanguage')}</label>
-                <select
-                  className="form-input"
-                  value={preferredLanguage}
-                  onChange={(e) => {
-                    setPreferredLanguage(e.target.value);
-                    // Keep the app-wide language in sync so the choice is
-                    // reflected everywhere immediately.
-                    setLanguage(e.target.value);
+            <div
+              id="auth-tabpanel"
+              role="tabpanel"
+              aria-labelledby={`auth-tab-${tab}`}
+            >
+              {tab === TAB_FORGOT ? (
+                /* ---- Forgot Password ---- */
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    setLoading(true);
+                    setError('');
+                    setSuccess('');
+                    setResetEmailSent(true);
+                    setLoading(false);
                   }}
                 >
-                  {LANGUAGES.map((l) => (
-                    <option key={l.code} value={l.code}>
-                      {l.label}
-                    </option>
-                  ))}
-                </select>
-                <div style={{ marginTop: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-muted-fg)' }}>
-                  {t('preferredLanguageHint')}
-                </div>
-              </div>
-            )}
-            
-            <div className="form-group">
-              <label className="form-label">{t('email')}</label>
-              <input
-                className="form-input"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </div>
+                  {error && <div className="auth-alert auth-alert--error" role="alert">{tx(error)}</div>}
+                  {success && <div className="auth-alert auth-alert--success" role="status">{tx(success)}</div>}
 
-            {tab === 1 && (
-              <>
-                <div className="form-group">
-                  <label className="form-label">{t('registerAs')}</label>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', cursor: 'pointer', padding: '10px 14px', border: '1px solid var(--color-input)', borderRadius: 'var(--radius-md)', backgroundColor: registrationType === 'individual' ? 'rgba(142, 102, 241, 0.08)' : 'transparent', borderColor: registrationType === 'individual' ? 'var(--color-primary)' : 'var(--color-input)', transition: 'all 0.2s' }}>
+                  <div className="auth-field">
+                    <label className="auth-field__label" htmlFor="auth-reset-email">{t('email')}</label>
+                    <div className="auth-field__control">
+                      <span className="auth-field__icon" aria-hidden="true"><MailIcon /></span>
                       <input
-                        type="radio"
-                        name="registrationType"
-                        value="individual"
-                        checked={registrationType === 'individual'}
-                        onChange={() => handleRegistrationTypeChange('individual')}
-                        style={{ accentColor: 'var(--color-primary)', width: '16px', height: '16px' }}
+                        id="auth-reset-email"
+                        className="auth-input"
+                        type="email"
+                        autoComplete="email"
+                        placeholder={t('emailPlaceholder')}
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        required
                       />
-                      <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--color-fg)' }}>{t('individual')}</span>
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', cursor: 'pointer', padding: '10px 14px', border: '1px solid var(--color-input)', borderRadius: 'var(--radius-md)', backgroundColor: registrationType === 'company' ? 'rgba(142, 102, 241, 0.08)' : 'transparent', borderColor: registrationType === 'company' ? 'var(--color-primary)' : 'var(--color-input)', transition: 'all 0.2s' }}>
-                      <input
-                        type="radio"
-                        name="registrationType"
-                        value="company"
-                        checked={registrationType === 'company'}
-                        onChange={() => handleRegistrationTypeChange('company')}
-                        style={{ accentColor: 'var(--color-primary)', width: '16px', height: '16px' }}
-                      />
-                      <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--color-fg)' }}>{t('viaCode')}</span>
-                    </label>
-                  </div>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">{t('profile')}</label>
-                  <select
-                    className="form-input"
-                    value={profile}
-                    onChange={(e) => setProfile(e.target.value)}
-                    required
-                    disabled={loadingProfiles}
-                  >
-                    <option value="" disabled>{t('selectProfile')}</option>
-                    {loadingProfiles ? (
-                      <option disabled>{t('loadingProfiles')}</option>
-                    ) : (
-                      sortProfiles(profiles)
-                        .filter((profileItem) =>
-                          profileItem.name &&
-                          profileItem.name.toLowerCase() !== 'solv' &&
-                          profileItem.name.toLowerCase() !== 'individual' &&
-                          profileItem.name.toLowerCase() !== 'general'
-                        )
-                        .map((profileItem) => (
-                          <option key={profileItem.id} value={profileItem.name}>
-                            {tx(profileItem.name)}
-                          </option>
-                        ))
-                    )}
-                  </select>
-                </div>
-
-                {registrationType === 'company' && (
-                  <div className="form-group">
-                    <label className="form-label">{t('companyCode')}</label>
-                    <input
-                      className="form-input"
-                      type="text"
-                      value={onboardingCode}
-                      onChange={(e) => setOnboardingCode(e.target.value)}
-                      placeholder="e.g. AB12CD"
-                      style={{ textTransform: 'uppercase' }}
-                      required
-                    />
-
-                    {/* Real-time verification display */}
-                    <div style={{ marginTop: 'var(--space-2)', fontSize: 'var(--text-xs)' }}>
-                      {verifyingCode && (
-                        <span style={{ color: 'var(--color-muted-fg)' }}>{t('resolvingCode')}</span>
-                      )}
-                      {verifiedOrgName && (
-                        <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>
-                          ✅ {t('verifiedJoining')} <strong>{tx(verifiedOrgName)}</strong>
-                        </span>
-                      )}
-                      {codeVerificationError && (
-                        <span ref={codeErrorRef} style={{ color: 'var(--color-destructive)', fontWeight: 600, display: 'block' }}>
-                          ❌ {tx(codeVerificationError)}
-                        </span>
-                      )}
-                      {!onboardingCode.trim() && !verifiedOrgName && !codeVerificationError && !verifyingCode && (
-                        <span style={{ color: 'var(--color-muted-fg)' }}>
-                          {t('enterCompanyCode')}
-                        </span>
-                      )}
                     </div>
                   </div>
-                )}
-              </>
-            )}
-            
-            <div className="form-group">
-              <label className="form-label">{t('password')}</label>
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                <input
-                  className="form-input"
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  style={{ paddingRight: '2.5rem', width: '100%' }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  style={{
-                    position: 'absolute',
-                    right: '0.75rem',
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: 'var(--color-muted-fg, #6b7280)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: '4px'
-                  }}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                >
-                  {showPassword ? <VisibilityOffIcon style={{ fontSize: '1.25rem' }} /> : <VisibilityIcon style={{ fontSize: '1.25rem' }} />}
-                </button>
-              </div>
+
+                  {resetEmailSent && (
+                    <div className="auth-alert auth-alert--info" role="status">
+                      <strong>{t('checkEmail')}</strong> {t('resetSentPre')} {email}. {t('resetSentPost')}
+                    </div>
+                  )}
+
+                  <button type="submit" className="auth-submit">{t('resetPassword')}</button>
+                </form>
+              ) : (
+                /* ---- Login / Sign Up ---- */
+                <form onSubmit={(e) => { e.preventDefault(); handleAuth(tab === TAB_SIGNUP); }}>
+                  {error && <div className="auth-alert auth-alert--error" role="alert">{tx(error)}</div>}
+                  {success && <div className="auth-alert auth-alert--success" role="status">{tx(success)}</div>}
+
+                  {tab === TAB_SIGNUP && (
+                    <>
+                      <div className="auth-field">
+                        <label className="auth-field__label" htmlFor="auth-name">{t('userName')}</label>
+                        <div className="auth-field__control">
+                          <span className="auth-field__icon" aria-hidden="true"><UserIcon /></span>
+                          <input
+                            id="auth-name"
+                            className="auth-input"
+                            type="text"
+                            autoComplete="name"
+                            placeholder={t('namePlaceholder')}
+                            value={userName}
+                            onChange={(e) => setUserName(e.target.value)}
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      <div className="auth-field">
+                        <label className="auth-field__label" htmlFor="auth-language">{t('preferredLanguage')}</label>
+                        <div className="auth-field__control">
+                          <span className="auth-field__icon" aria-hidden="true"><LanguageIcon /></span>
+                          <select
+                            id="auth-language"
+                            className="auth-select"
+                            value={preferredLanguage}
+                            onChange={(e) => {
+                              setPreferredLanguage(e.target.value);
+                              // Keep the app-wide language in sync so the choice
+                              // is reflected everywhere immediately.
+                              setLanguage(e.target.value);
+                            }}
+                          >
+                            {LANGUAGES.map((l) => (
+                              <option key={l.code} value={l.code}>{l.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <p className="auth-field__hint">{t('preferredLanguageHint')}</p>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="auth-field">
+                    <label className="auth-field__label" htmlFor="auth-email">{t('email')}</label>
+                    <div className="auth-field__control">
+                      <span className="auth-field__icon" aria-hidden="true"><MailIcon /></span>
+                      <input
+                        id="auth-email"
+                        className="auth-input"
+                        type="email"
+                        autoComplete="email"
+                        placeholder={t('emailPlaceholder')}
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {tab === TAB_SIGNUP && (
+                    <>
+                      <fieldset className="auth-field auth-fieldset">
+                        <legend className="auth-field__label">{t('registerAs')}</legend>
+                        <div className="auth-choices">
+                          <label className={`auth-choice${registrationType === 'individual' ? ' auth-choice--selected' : ''}`}>
+                            <input
+                              type="radio"
+                              name="registrationType"
+                              value="individual"
+                              checked={registrationType === 'individual'}
+                              onChange={() => handleRegistrationTypeChange('individual')}
+                            />
+                            <span>{t('individual')}</span>
+                          </label>
+                          <label className={`auth-choice${registrationType === 'company' ? ' auth-choice--selected' : ''}`}>
+                            <input
+                              type="radio"
+                              name="registrationType"
+                              value="company"
+                              checked={registrationType === 'company'}
+                              onChange={() => handleRegistrationTypeChange('company')}
+                            />
+                            <span>{t('viaCode')}</span>
+                          </label>
+                        </div>
+                      </fieldset>
+
+                      <div className="auth-field">
+                        <label className="auth-field__label" htmlFor="auth-profile">{t('profile')}</label>
+                        <div className="auth-field__control">
+                          <span className="auth-field__icon" aria-hidden="true"><TargetIcon /></span>
+                          <select
+                            id="auth-profile"
+                            className="auth-select"
+                            value={profile}
+                            onChange={(e) => setProfile(e.target.value)}
+                            required
+                            disabled={loadingProfiles}
+                          >
+                            <option value="" disabled>{t('selectProfile')}</option>
+                            {loadingProfiles ? (
+                              <option disabled>{t('loadingProfiles')}</option>
+                            ) : (
+                              sortProfiles(profiles)
+                                .filter((profileItem) =>
+                                  profileItem.name &&
+                                  profileItem.name.toLowerCase() !== 'solv' &&
+                                  profileItem.name.toLowerCase() !== 'individual' &&
+                                  profileItem.name.toLowerCase() !== 'general'
+                                )
+                                .map((profileItem) => (
+                                  <option key={profileItem.id} value={profileItem.name}>
+                                    {tx(profileItem.name)}
+                                  </option>
+                                ))
+                            )}
+                          </select>
+                        </div>
+                      </div>
+
+                      {registrationType === 'company' && (
+                        <div className="auth-field">
+                          <label className="auth-field__label" htmlFor="auth-code">{t('companyCode')}</label>
+                          <div className="auth-field__control">
+                            <span className="auth-field__icon" aria-hidden="true"><BuildingIcon /></span>
+                            <input
+                              id="auth-code"
+                              className="auth-input auth-input--code"
+                              type="text"
+                              placeholder="e.g. AB12CD"
+                              value={onboardingCode}
+                              onChange={(e) => setOnboardingCode(e.target.value)}
+                              required
+                            />
+                          </div>
+
+                          {/* Real-time verification feedback */}
+                          <p className="auth-field__hint" aria-live="polite">
+                            {verifyingCode && t('resolvingCode')}
+                            {!verifyingCode && verifiedOrgName && (
+                              <span className="auth-field__hint--success">
+                                ✅ {t('verifiedJoining')} <strong>{tx(verifiedOrgName)}</strong>
+                              </span>
+                            )}
+                            {!verifyingCode && codeVerificationError && (
+                              <span className="auth-field__hint--error">❌ {tx(codeVerificationError)}</span>
+                            )}
+                            {!verifyingCode && !verifiedOrgName && !codeVerificationError && !onboardingCode.trim() &&
+                              t('enterCompanyCode')}
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  <div className="auth-field">
+                    <label className="auth-field__label" htmlFor="auth-password">{t('password')}</label>
+                    <div className="auth-field__control">
+                      <span className="auth-field__icon" aria-hidden="true"><LockIcon /></span>
+                      <input
+                        id="auth-password"
+                        className="auth-input"
+                        type={showPassword ? 'text' : 'password'}
+                        autoComplete={tab === TAB_SIGNUP ? 'new-password' : 'current-password'}
+                        placeholder={t('passwordPlaceholder')}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                      />
+                      <button
+                        type="button"
+                        className="auth-reveal"
+                        onClick={() => setShowPassword((shown) => !shown)}
+                        aria-label={showPassword ? t('hidePassword') : t('showPassword')}
+                        aria-pressed={showPassword}
+                      >
+                        {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="auth-submit"
+                    disabled={
+                      loading ||
+                      (tab === TAB_SIGNUP && (
+                        !userName.trim() ||
+                        !email.trim() ||
+                        !profile ||
+                        !password.trim() ||
+                        (registrationType === 'company' && (!onboardingCode.trim() || !verifiedOrgName))
+                      ))
+                    }
+                  >
+                    {loading
+                      ? (tab === TAB_SIGNUP ? t('signingUp') : t('loggingIn'))
+                      : (tab === TAB_SIGNUP ? t('signUp') : t('login'))}
+                  </button>
+
+                  {tab === TAB_LOGIN && (
+                    <p className="auth-footnote">
+                      {t('newHere')}{' '}
+                      <button type="button" className="auth-link" onClick={() => handleTabChange(TAB_SIGNUP)}>
+                        {t('signUp')}
+                      </button>
+                    </p>
+                  )}
+
+                  {tab === TAB_SIGNUP && (
+                    <p className="auth-note">
+                      <strong>{t('noteLabel')}</strong> {t('profileNote')}
+                    </p>
+                  )}
+                </form>
+              )}
             </div>
+          </div>
+        </div>
 
-            <button
-              type="submit"
-              className="btn btn--primary"
-              style={{ width: '100%', marginBottom: 'var(--space-4)' }}
-              disabled={loading}
-            >
-              {loading ? (tab === 1 ? t('signingUp') : t('loggingIn')) : (tab === 0 ? t('login') : t('signUp'))}
-            </button>
-
-            {tab === 1 && (
-              <div className="alert" style={{ backgroundColor: '#E5DFFF', color: '#191928', border: '1px solid #E5DFFF', fontSize: 'var(--text-sm)', padding: 'var(--space-4)', borderRadius: 'var(--radius-md)' }}>
-                <strong>{t('noteLabel')}</strong> {t('profileNote')}
-              </div>
-            )}
-          </form>
-        )}
+        {/* ---- USP strip ---------------------------------------------- */}
+        <ul className="auth-usps">
+          {USP_CARDS.map(({ id, icon, title, text }) => (
+            <li key={id} className="usp-card">
+              <span className="usp-card__icon" aria-hidden="true">{icon}</span>
+              <h2 className="usp-card__title">{t(title)}</h2>
+              <p className="usp-card__text">{t(text)}</p>
+            </li>
+          ))}
+        </ul>
       </div>
     </div>
   );
