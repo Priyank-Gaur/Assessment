@@ -20,6 +20,7 @@ const QuizBuilder = ({ profiles, packets, savedQuizzes, addQuiz, updateQuiz, del
   const [isEditing, setIsEditing] = useState(false);
   const formRef = useRef(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [packetSearchQuery, setPacketSearchQuery] = useState('');
 
   const filteredQuizzes = useMemo(() => {
     if (!searchQuery.trim()) return savedQuizzes;
@@ -28,6 +29,15 @@ const QuizBuilder = ({ profiles, packets, savedQuizzes, addQuiz, updateQuiz, del
       q.name && q.name.toLowerCase().includes(query)
     );
   }, [savedQuizzes, searchQuery]);
+
+  const filteredAvailablePackets = useMemo(() => {
+    if (!packetSearchQuery.trim()) return packets;
+    const query = packetSearchQuery.toLowerCase().trim();
+    return (packets || []).filter(p => 
+      (p.name && p.name.toLowerCase().includes(query)) ||
+      (p.description && p.description.toLowerCase().includes(query))
+    );
+  }, [packets, packetSearchQuery]);
 
   const onDragEnd = (result) => {
     if (!result.destination) return;
@@ -48,8 +58,8 @@ const QuizBuilder = ({ profiles, packets, savedQuizzes, addQuiz, updateQuiz, del
   };
 
   const saveQuiz = async () => {
-    if (!quizName || (!isEditing && selectedProfiles.length === 0) || quizPackets.length === 0) {
-      alert('Quiz name, at least one profile (for new quizzes), and at least one packet required!');
+    if (!quizName || quizPackets.length === 0) {
+      alert('Quiz name and at least one packet required!');
       return;
     }
     
@@ -281,7 +291,7 @@ const QuizBuilder = ({ profiles, packets, savedQuizzes, addQuiz, updateQuiz, del
             type="button"
             className="btn btn--primary btn--full"
             onClick={saveQuiz}
-            disabled={!quizName || (!isEditing && selectedProfiles.length === 0) || quizPackets.length === 0}
+            disabled={!quizName || quizPackets.length === 0}
             style={{ marginBottom: 'var(--space-3)' }}
           >
             <SaveIcon className="btn-icon" />
@@ -358,25 +368,47 @@ const QuizBuilder = ({ profiles, packets, savedQuizzes, addQuiz, updateQuiz, del
         {/* Right Column - Available Packets */}
         <div className="quiz-card">
           <h3 className="quiz-card__title">Available Packets</h3>
+          <div className="search-bar-container" style={{ marginBottom: 'var(--space-3)' }}>
+            <input
+              type="text"
+              className="form-input search-input"
+              value={packetSearchQuery}
+              onChange={e => setPacketSearchQuery(e.target.value)}
+              placeholder="Search packets..."
+              style={{
+                paddingLeft: '36px',
+                backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'none\' viewBox=\'0 0 24 24\' stroke=\'%23895BF5\'%3E%3Cpath stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'2\' d=\'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z\'/%3E%3C/svg%3E")',
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: '10px center',
+                backgroundSize: '18px 18px'
+              }}
+            />
+          </div>
           <div className="available-packets-list">
-            {packets.map((packet) => {
-              const isDisabled = !!quizPackets.find((p) => p.id === packet.id);
-              return (
-                <div
-                  key={packet.id}
-                  className={`available-packet-item ${isDisabled ? 'available-packet-item--disabled' : ''}`}
-                  onClick={() => !isDisabled && addPacketToQuiz(packet)}
-                >
-                  <div>
-                    <div className="available-packet-item__name">{packet.name}</div>
-                    <div className="available-packet-item__questions">
-                      {packet.questions?.length || 0} questions
+            {filteredAvailablePackets.length === 0 ? (
+              <p className="form-helper" style={{ textAlign: 'center', margin: 'var(--space-4) 0' }}>
+                {packetSearchQuery ? "No packets match your search." : "No available packets."}
+              </p>
+            ) : (
+              filteredAvailablePackets.map((packet) => {
+                const isDisabled = !!quizPackets.find((p) => p.id === packet.id);
+                return (
+                  <div
+                    key={packet.id}
+                    className={`available-packet-item ${isDisabled ? 'available-packet-item--disabled' : ''}`}
+                    onClick={() => !isDisabled && addPacketToQuiz(packet)}
+                  >
+                    <div>
+                      <div className="available-packet-item__name">{packet.name}</div>
+                      <div className="available-packet-item__questions">
+                        {packet.questions?.length || 0} questions
+                      </div>
                     </div>
+                    <AddCircleOutlineIcon style={{ color: isDisabled ? 'var(--color-muted)' : 'var(--color-primary)', width: '20px', height: '20px' }} />
                   </div>
-                  <AddCircleOutlineIcon style={{ color: isDisabled ? 'var(--color-muted)' : 'var(--color-primary)', width: '20px', height: '20px' }} />
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
       </div>

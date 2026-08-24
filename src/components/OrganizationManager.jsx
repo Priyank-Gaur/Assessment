@@ -305,6 +305,9 @@ const OrganizationManager = ({
         // Identify Name and Email headers case-insensitively
         const nameHeader = headers.find(h => /name/i.test(h)) || 'Name';
         const emailHeader = headers.find(h => /email/i.test(h)) || 'Email';
+        // Identify an optional Code header - exact match only, since "code" is
+        // a common substring in unrelated headers (Discount Code, Zip Code, etc.)
+        const codeHeader = headers.find(h => /^code$/i.test(h.trim()));
 
         // Get existing employee emails for this organization to check duplicates
         const existingEmails = new Set(
@@ -313,14 +316,23 @@ const OrganizationManager = ({
             .map(emp => emp.email.toLowerCase())
         );
 
+        // Employee codes are unique system-wide (matches server-side generation
+        // scope), not just within this organization.
+        const existingCodes = new Set(
+          (employees || [])
+            .filter(emp => emp.code)
+            .map(emp => emp.code.toUpperCase())
+        );
+
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         const fileEmails = new Set();
-        
+        const fileCodes = new Set();
+
         const validated = rawRows
           .map((row, idx) => {
-            // Get original keys and filter out Name and Email headers
+            // Get original keys and filter out Name, Email and Code headers
             const extraKeys = Object.keys(row).filter(
-              k => k !== nameHeader && k !== emailHeader
+              k => k !== nameHeader && k !== emailHeader && k !== codeHeader
             );
             
             // Build dynamic metadata object
@@ -333,6 +345,9 @@ const OrganizationManager = ({
 
             const name = String(row[nameHeader] || '').trim();
             const email = String(row[emailHeader] || '').trim();
+            // Preserve the code exactly as it appears in the sheet (only trim
+            // stray whitespace) - it's used as-is for sign-up, not reformatted.
+            const code = codeHeader ? String(row[codeHeader] || '').trim() : '';
 
             // Ignore completely empty rows
             if (!name && !email && extraKeys.every(k => !row[k])) {
@@ -340,12 +355,12 @@ const OrganizationManager = ({
             }
 
             const errors = [];
-            
+
             // Validation: Name is mandatory
             if (!name) {
               errors.push('Missing Name');
             }
-            
+
             // Validation: Email is mandatory
             if (!email) {
               errors.push('Missing Email');
@@ -355,13 +370,13 @@ const OrganizationManager = ({
                 errors.push('Invalid Email Format');
               } else {
                 const lowerEmail = email.toLowerCase();
-                
+
                 // Validation: Duplicate inside file
                 if (fileEmails.has(lowerEmail)) {
                   errors.push('Duplicate in file');
                 } else {
                   fileEmails.add(lowerEmail);
-                  
+
                   // Validation: Duplicate in organization
                   if (existingEmails.has(lowerEmail)) {
                     errors.push('Already exists in organization');
@@ -370,10 +385,26 @@ const OrganizationManager = ({
               }
             }
 
+            // Validation: supplied Code must be unique (file + system-wide).
+            // Compared case-insensitively so "abc123" and "ABC123" are still
+            // caught as the same code, even though the original casing is kept.
+            if (code) {
+              const codeKey = code.toUpperCase();
+              if (fileCodes.has(codeKey)) {
+                errors.push('Duplicate Code in file');
+              } else {
+                fileCodes.add(codeKey);
+                if (existingCodes.has(codeKey)) {
+                  errors.push('Code already exists');
+                }
+              }
+            }
+
             return {
               rowNumber: idx + 2, // Excel row index is 1-based header + 1-based data
               name,
               email,
+              code,
               metadata,
               errors,
               isValid: errors.length === 0,
@@ -392,6 +423,19 @@ const OrganizationManager = ({
   };
 
   const handleSaveImport = async () => {
+    // A duplicate Code anywhere in the file blocks the entire upload -
+    // no records are imported until the file is fixed and re-uploaded.
+    const duplicateCodeRows = previewRows.filter(
+      r => r.errors.includes('Duplicate Code in file') || r.errors.includes('Code already exists')
+    );
+    if (duplicateCodeRows.length > 0) {
+      alert(
+        `Import blocked: duplicate Code found on row(s) ${duplicateCodeRows.map(r => r.rowNumber).join(', ')}. ` +
+        `Fix the Code column and re-upload - no records were imported.`
+      );
+      return;
+    }
+
     const validRows = previewRows.filter(r => r.isValid);
     if (validRows.length === 0) {
       alert('No valid records to import.');
@@ -403,7 +447,8 @@ const OrganizationManager = ({
       const employeesToSave = validRows.map(r => ({
         name: r.name,
         email: r.email,
-        metadata: r.metadata
+        metadata: r.metadata,
+        ...(r.code ? { code: r.code } : {})
       }));
 
       await importEmployees(viewingOrg.id, employeesToSave);
@@ -1078,6 +1123,7 @@ const OrganizationManager = ({
                                     <th style={{ padding: '8px var(--space-2)', fontWeight: 600 }}>Row</th>
                                     <th style={{ padding: '8px var(--space-2)', fontWeight: 600 }}>Name</th>
                                     <th style={{ padding: '8px var(--space-2)', fontWeight: 600 }}>Email</th>
+                                    <th style={{ padding: '8px var(--space-2)', fontWeight: 600 }}>Code</th>
                                     <th style={{ padding: '8px var(--space-2)', fontWeight: 600 }}>Attributes</th>
                                     <th style={{ padding: '8px var(--space-2)', fontWeight: 600 }}>Status</th>
                                   </tr>
@@ -1097,6 +1143,9 @@ const OrganizationManager = ({
                                       </td>
                                       <td style={{ padding: '8px var(--space-2)', color: row.email ? 'inherit' : 'var(--color-muted-fg)' }}>
                                         {row.email || '(Empty)'}
+                                      </td>
+                                      <td style={{ padding: '8px var(--space-2)', color: row.code ? 'inherit' : 'var(--color-muted-fg)' }}>
+                                        {row.code || <em>(auto)</em>}
                                       </td>
                                       <td style={{ padding: '8px var(--space-2)' }}>
                                         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
@@ -1171,11 +1220,14 @@ const OrganizationManager = ({
                                 >
                                   Cancel
                                 </button>
-                                <button 
-                                  type="button" 
-                                  className="btn btn--primary" 
+                                <button
+                                  type="button"
+                                  className="btn btn--primary"
                                   onClick={handleSaveImport}
-                                  disabled={previewRows.filter(r => r.isValid).length === 0}
+                                  disabled={
+                                    previewRows.filter(r => r.isValid).length === 0 ||
+                                    previewRows.some(r => r.errors.includes('Duplicate Code in file') || r.errors.includes('Code already exists'))
+                                  }
                                 >
                                   Import Valid Rows ({previewRows.filter(r => r.isValid).length})
                                 </button>

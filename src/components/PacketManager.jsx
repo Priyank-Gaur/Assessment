@@ -89,8 +89,8 @@ const PacketManager = ({ packets: rawPackets, addPacket, updatePacket, deletePac
   const [scoringScaleDialog, setScoringScaleDialog] = useState(false);
   const [scoringScale, setScoringScale] = useState([
     { min: 0, max: 2, label: "Needs Improvement", color: "#ff6b6b", image: "📚", largeText: "Keep practicing! You're making progress." },
-    { min: 3, max: 5, label: "Average", color: "#E0A63F", image: "📊", largeText: "Good effort! You're on the right track." },
-    { min: 6, max: 8, label: "Good", color: "#4FC7A4", image: "🎯", largeText: "Well done! You're showing strong understanding." },
+    { min: 3, max: 5, label: "Average", color: "#FCCB00", image: "📊", largeText: "Good effort! You're on the right track." },
+    { min: 6, max: 8, label: "Good", color: "#6bcf7f", image: "🎯", largeText: "Well done! You're showing strong understanding." },
     { min: 9, max: 15, label: "Excellent", color: "#4ecdc4", image: "🏆", largeText: "Outstanding! You've mastered this material!" }
   ]);
   const [enableScoringScale, setEnableScoringScale] = useState(false);
@@ -287,8 +287,8 @@ const PacketManager = ({ packets: rawPackets, addPacket, updatePacket, deletePac
                    i === 1 ? "Average" : 
                    i === 2 ? "Good" : "Excellent",
             color: i === 0 ? "#ff6b6b" : 
-                   i === 1 ? "#E0A63F" : 
-                   i === 2 ? "#4FC7A4" : "#4ecdc4",
+                   i === 1 ? "#FCCB00" : 
+                   i === 2 ? "#6bcf7f" : "#4ecdc4",
             image: i === 0 ? "📚" : 
                    i === 1 ? "📊" : 
                    i === 2 ? "🎯" : "🏆",
@@ -535,12 +535,28 @@ const PacketManager = ({ packets: rawPackets, addPacket, updatePacket, deletePac
         // Reset to default scale if no custom scale found
         setScoringScale([
           { min: 0, max: 2, label: "Needs Improvement", color: "#ff6b6b", image: "📚", largeText: "Keep practicing! You're making progress." },
-          { min: 3, max: 5, label: "Average", color: "#E0A63F", image: "📊", largeText: "Good effort! You're on the right track." },
-          { min: 6, max: 8, label: "Good", color: "#4FC7A4", image: "🎯", largeText: "Well done! You're showing strong understanding." },
+          { min: 3, max: 5, label: "Average", color: "#FCCB00", image: "📊", largeText: "Good effort! You're on the right track." },
+          { min: 6, max: 8, label: "Good", color: "#6bcf7f", image: "🎯", largeText: "Well done! You're showing strong understanding." },
           { min: 9, max: 15, label: "Excellent", color: "#4ecdc4", image: "🏆", largeText: "Outstanding! You've mastered this material!" }
         ]);
         setEnableScoringScale(false);
         console.log('🔄 Reset to default scoring scale');
+      }
+
+      // Auto-fill options from the last question in the selected packet if available
+      if (packet && packet.questions && packet.questions.length > 0) {
+        const lastQ = packet.questions[packet.questions.length - 1];
+        if (lastQ && lastQ.options && Array.isArray(lastQ.options) && lastQ.options.length > 0) {
+          const formattedOptions = lastQ.options.map(opt => {
+            if (typeof opt === 'string') {
+              return { text: opt, marks: lastQ.marks || 0 };
+            }
+            return { text: opt.text || '', marks: typeof opt.marks === 'number' ? opt.marks : 0 };
+          });
+          setOptions(formattedOptions);
+          const type = (lastQ.question_type === 'true_false' || lastQ.type === 'true_false') ? 'TrueFalse' : 'MCQ';
+          setQuestionType(type);
+        }
       }
     }
   }, [selectedPacket, packets]);
@@ -646,7 +662,12 @@ const PacketManager = ({ packets: rawPackets, addPacket, updatePacket, deletePac
       
       await addQuestion(questionData);
       setQuestionText('');
-      setOptions([{ text: '', marks: 0 }]);
+      // Auto-fill options and scores from the added question for the next question
+      if (options && options.length > 0) {
+        setOptions(options.map(opt => ({ text: opt.text || '', marks: typeof opt.marks === 'number' ? opt.marks : 0 })));
+      } else {
+        setOptions([{ text: '', marks: 0 }]);
+      }
       
       // Force re-render to update marks calculation
       setSelectedPacket(selectedPacket);
@@ -1290,7 +1311,7 @@ const PacketManager = ({ packets: rawPackets, addPacket, updatePacket, deletePac
 
       {/* Scoring Scale Configuration Modal */}
       {scoringScaleDialog && (
-        <div className="modal-overlay" onClick={closeScoringScaleDialog}>
+        <div className="modal-overlay">
           <div className="modal-container modal-container--lg" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <div>

@@ -25,6 +25,8 @@ const AssessmentReport = () => {
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterOrg, setFilterOrg] = useState('all');
   const [filterProfile, setFilterProfile] = useState('all');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [sortBy, setSortBy] = useState('date-desc');
   const [showDetails, setShowDetails] = useState(false);
   const [generatingPDF, setGeneratingPDF] = useState(false);
@@ -109,6 +111,25 @@ const AssessmentReport = () => {
         if (!isSameProfile(attemptProfileName, filterProfile)) return false;
       }
 
+      // Filter by Date Range (From Date / To Date)
+      const attemptDateStr = attempt.completed_at || attempt.created_at || attempt.started_at;
+      if (fromDate || toDate) {
+        if (!attemptDateStr) return false;
+        const attemptTime = new Date(attemptDateStr).getTime();
+
+        if (fromDate) {
+          const start = new Date(fromDate);
+          start.setHours(0, 0, 0, 0);
+          if (attemptTime < start.getTime()) return false;
+        }
+
+        if (toDate) {
+          const end = new Date(toDate);
+          end.setHours(23, 59, 59, 999);
+          if (attemptTime > end.getTime()) return false;
+        }
+      }
+
       return true;
     });
 
@@ -136,7 +157,7 @@ const AssessmentReport = () => {
       }
       return 0;
     });
-  }, [quizAttempts, searchTerm, filterStatus, filterOrg, filterProfile, sortBy]);
+  }, [quizAttempts, searchTerm, filterStatus, filterOrg, filterProfile, fromDate, toDate, sortBy]);
 
 
   const handleQuizSelect = async (quiz) => {
@@ -511,6 +532,30 @@ const AssessmentReport = () => {
                 <option key={p} value={p}>{p}</option>
               ))}
             </select>
+
+            <div className="report-date-filters" style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'nowrap' }}>
+              <div className="report-date-group" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-muted-fg)', fontWeight: 500 }}>From:</span>
+                <input
+                  type="date"
+                  className="report-filter-select"
+                  style={{ minWidth: '130px', padding: '8px 10px' }}
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                />
+              </div>
+
+              <div className="report-date-group" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-muted-fg)', fontWeight: 500 }}>To:</span>
+                <input
+                  type="date"
+                  className="report-filter-select"
+                  style={{ minWidth: '130px', padding: '8px 10px' }}
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                />
+              </div>
+            </div>
 
             <select
               className="report-filter-select"
