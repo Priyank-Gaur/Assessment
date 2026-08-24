@@ -219,7 +219,7 @@ function AuthPage() {
       setCodeVerificationError('')
       setVerifiedOrgName('')
       try {
-        const response = await fetch(`${API_BASE}/auth/verify-code?code=${encodeURIComponent(onboardingCode.trim().toUpperCase())}`, {
+        const response = await fetch(`${API_BASE}/auth/verify-code?code=${encodeURIComponent(onboardingCode.trim())}`, {
           headers: { 'ngrok-skip-browser-warning': 'true' }
         })
         if (response.ok) {
@@ -380,7 +380,7 @@ function AuthPage() {
             userName: userName,
             user_name: userName,
             profile: profile,
-            userCode: trimmedCode ? trimmedCode.toUpperCase() : '',
+            userCode: trimmedCode,
             organization: verifiedOrgName || 'Individual',
             // Preferred language chosen during registration (both casings for
             // whichever the backend validator expects).
