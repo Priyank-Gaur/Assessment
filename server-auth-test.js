@@ -494,7 +494,7 @@ function generateUniqueEmployeeCode(employees = []) {
     for (let i = 0; i < 6; i++) {
       code += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-    const exists = employees.some(e => e.code === code);
+    const exists = employees.some(e => e.code && e.code.toUpperCase() === code);
     if (!exists) {
       isUnique = true;
     }
@@ -713,7 +713,7 @@ app.get('/api/auth/verify-code', (req, res) => {
   if (!mockData.employees) {
     mockData.employees = [];
   }
-  const emp = mockData.employees.find(e => e.code === code.trim().toUpperCase());
+  const emp = mockData.employees.find(e => e.code && e.code.toUpperCase() === code.trim().toUpperCase());
   if (!emp) {
     return res.status(404).json({ error: 'Invalid user code' });
   }
@@ -783,7 +783,7 @@ app.post('/api/auth/signup', async (req, res) => {
     if (!mockData.generated_codes) mockData.generated_codes = [];
 
     // 1. First check pre-existing single-employee code
-    let emp = mockData.employees.find(e => e.code === code);
+    let emp = mockData.employees.find(e => e.code && e.code.toUpperCase() === code.toUpperCase());
     if (emp) {
       if (emp.email.toLowerCase() !== email.trim().toLowerCase()) {
         let metadata = emp.metadata || {};
@@ -1360,6 +1360,11 @@ app.post('/api/organizations/:orgId/employees/import', requireAdmin, (req, res) 
     .filter(e => e.organization_id === orgId)
     .map(e => e.email.toLowerCase());
 
+  // Employee codes are unique system-wide, matching generateUniqueEmployeeCode's scope.
+  const existingCodes = mockData.employees
+    .filter(e => e.code)
+    .map(e => e.code.toUpperCase());
+
   const imported = [];
   const allCurrentEmployees = [...(mockData.employees || [])];
   for (const emp of employees) {
@@ -1369,8 +1374,16 @@ app.post('/api/organizations/:orgId/employees/import', requireAdmin, (req, res) 
     if (existingEmails.includes(emp.email.toLowerCase())) {
       return res.status(400).json({ error: `Email ${emp.email} already exists in this organization` });
     }
-    
-    const code = generateUniqueEmployeeCode(allCurrentEmployees);
+
+    // Preserve the supplied code exactly as given - only trim whitespace.
+    // Uniqueness is still checked case-insensitively so "abc123"/"ABC123"
+    // aren't treated as different codes.
+    const suppliedCode = emp.code ? String(emp.code).trim() : '';
+    if (suppliedCode && existingCodes.includes(suppliedCode.toUpperCase())) {
+      return res.status(400).json({ error: `Code ${suppliedCode} already exists` });
+    }
+
+    const code = suppliedCode || generateUniqueEmployeeCode(allCurrentEmployees);
     const newEmp = {
       id: String(Date.now() + Math.random()),
       organization_id: orgId,
@@ -1381,10 +1394,11 @@ app.post('/api/organizations/:orgId/employees/import', requireAdmin, (req, res) 
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
-    
+
     imported.push(newEmp);
     allCurrentEmployees.push(newEmp);
     existingEmails.push(newEmp.email.toLowerCase());
+    existingCodes.push(code.toUpperCase());
   }
 
   mockData.employees.push(...imported);

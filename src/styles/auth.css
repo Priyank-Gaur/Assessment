@@ -388,9 +388,9 @@
   padding: 0;
 }
 
-/* Company codes are issued uppercase and compared uppercase. */
+/* Codes are matched case-insensitively server-side, so the field shows
+   exactly what the user types rather than forcing a display case. */
 .auth-input--code {
-  text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 
