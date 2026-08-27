@@ -11,6 +11,9 @@ import { enrichQuizWithInstructions } from './QuizInstructionsMap';
 import { LANGUAGES, DEFAULT_LANGUAGE } from '../constants/languages';
 import { translateBatch } from '../services/translation';
 import { useLanguage } from '../contexts/LanguageContext';
+import { getAgeCategory } from '../utils/age';
+import { emptyGuardianConsent, isConsentComplete, saveGuardianConsent, getGuardianConsent } from '../utils/guardianConsent';
+import ParentGuardianConsent, { GUARDIAN_CONSENT_STRINGS, GUARDIAN_CONSENT_BLOCKED_MESSAGE } from './ParentGuardianConsent';
 
 // All page-level static text that should be translated along with the quiz
 // content. Keys are referenced via the `t()` helper inside the component so
@@ -92,6 +95,14 @@ const QuizAttempt = () => {
   const [showNotification, setShowNotification] = useState(false);
   const [notificationMessage, setNotificationMessage] = useState('');
   const [attemptId, setAttemptId] = useState(null);
+
+  // Parent/Guardian Information & Consent — required before a 13-17 year old
+  // can start the assessment. Age is derived from the account's date of
+  // birth (never a manual minor/adult toggle), so this triggers the same way
+  // regardless of which quiz route brought the user here.
+  const [guardianConsent, setGuardianConsent] = useState(emptyGuardianConsent());
+  const [showGuardianValidation, setShowGuardianValidation] = useState(false);
+  const guardianConsentRef = useRef(null);
 
   // ── Language / translation state ───────────────────────────
   // `language` is the selected target code ('en' = original backend content).
@@ -321,6 +332,23 @@ const QuizAttempt = () => {
 
     loadQuiz();
   }, [quizId, accessDenied]);
+
+  // Once the account is known, derive minor status from its age and preload
+  // any parent/guardian consent already captured for this email (e.g. at
+  // signup), so a minor who already has consent on file isn't asked again.
+  const existingGuardianConsent = user?.email ? getGuardianConsent(user.email) : null;
+  const rawUserAge = user?.age ?? existingGuardianConsent?.age ?? null;
+  const userAge = rawUserAge !== null && rawUserAge !== undefined ? Number(rawUserAge) : null;
+  const isMinorUser = getAgeCategory(userAge) === 'minor';
+  const guardianConsentOnFile = isMinorUser && isConsentComplete(existingGuardianConsent);
+
+  useEffect(() => {
+    if (!user) return;
+    const existing = user.email ? getGuardianConsent(user.email) : null;
+    if (existing) {
+      setGuardianConsent({ ...emptyGuardianConsent(), ...existing });
+    }
+  }, [user]);
 
   const saveProgress = async (updatedAnswers, index) => {
     const id = attemptIdRef.current;
@@ -631,6 +659,11 @@ const QuizAttempt = () => {
   // otherwise fall back to the original English text.
   const t = (key) => tr?.ui?.[key] ?? UI_STRINGS[key];
 
+  // Translate any Parent/Guardian Information & Consent string (looked up by
+  // its original English text rather than a key, matching how
+  // ParentGuardianConsent calls tx()).
+  const gcTx = (s) => tr?.guardianConsent?.[s] ?? s;
+
   // Handle language selection. Updating the app-wide preference is all this
   // needs to do — the effect below notices the new language and fetches the
   // translation, which is the same path used when the quiz first loads in a
@@ -654,6 +687,7 @@ const QuizAttempt = () => {
       const uiKeys = Object.keys(UI_STRINGS);
       const uiIdx = uiKeys.map((k) => push(UI_STRINGS[k]));
       const motivIdx = MOTIVATIONAL_MESSAGES.map((m) => push(m));
+      const gcIdx = GUARDIAN_CONSENT_STRINGS.map((s) => push(s));
       const quizNameIdx = push(quiz?.name);
       const quizInstrIdx = push(quiz?.start_instructions);
 
@@ -673,6 +707,9 @@ const QuizAttempt = () => {
       const ui = {};
       uiKeys.forEach((k, i) => { ui[k] = out[uiIdx[i]]; });
 
+      const guardianConsentMap = {};
+      GUARDIAN_CONSENT_STRINGS.forEach((s, i) => { guardianConsentMap[s] = out[gcIdx[i]]; });
+
       const questionMap = {};
       questionPlan.forEach((p) => {
         questionMap[p.id] = {
@@ -685,6 +722,7 @@ const QuizAttempt = () => {
         ...prev,
         [lang]: {
           ui,
+          guardianConsent: guardianConsentMap,
           motivational: motivIdx.map((i) => out[i]),
           quiz: {
             name: out[quizNameIdx],
@@ -955,13 +993,39 @@ const QuizAttempt = () => {
                   </>
                 )}
 
+                {isMinorUser && !guardianConsentOnFile && (
+                  <div ref={guardianConsentRef}>
+                    <ParentGuardianConsent
+                      value={guardianConsent}
+                      onChange={setGuardianConsent}
+                      showValidation={showGuardianValidation}
+                      tx={gcTx}
+                    />
+                  </div>
+                )}
+
+                {isMinorUser && !guardianConsentOnFile && showGuardianValidation && !isConsentComplete(guardianConsent) && (
+                  <p className="quiz-attempt__guardian-warning" role="alert">
+                    {gcTx(GUARDIAN_CONSENT_BLOCKED_MESSAGE)}
+                  </p>
+                )}
+
                 <div className="quiz-attempt__start-actions">
                 <button
                   className="quiz-attempt__start-btn"
                   onClick={async () => {
+                    if (isMinorUser && !guardianConsentOnFile && !isConsentComplete(guardianConsent)) {
+                      setShowGuardianValidation(true);
+                      guardianConsentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      return;
+                    }
+                    if (isMinorUser && !guardianConsentOnFile) {
+                      saveGuardianConsent(user.email, { ...guardianConsent, age: userAge });
+                    }
+
                     const startTime = new Date().toISOString();
                     startedAtRef.current = startTime;
-                    
+
                     // Create an incomplete attempt immediately in database if one does not exist yet
                     try {
                       if (!attemptIdRef.current) {

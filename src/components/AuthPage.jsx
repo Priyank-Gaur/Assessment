@@ -5,6 +5,9 @@ import { LANGUAGES } from '../constants/languages'
 import { sortProfiles } from '../utils/profileOrder'
 import { useLanguage } from '../contexts/LanguageContext'
 import { useTranslatedContent } from '../hooks/useTranslatedContent'
+import { getAgeCategory, MIN_SIGNUP_AGE, MAX_SIGNUP_AGE } from '../utils/age'
+import { emptyGuardianConsent, isConsentComplete, saveGuardianConsent } from '../utils/guardianConsent'
+import ParentGuardianConsent, { GUARDIAN_CONSENT_STRINGS, GUARDIAN_CONSENT_BLOCKED_MESSAGE } from './ParentGuardianConsent'
 
 const API_BASE = 'https://happimynd.com/new_api';
 
@@ -26,6 +29,15 @@ const UI_TEXT = {
   signUp: 'Sign Up',
   forgotPassword: 'Forgot Password',
   userName: 'User Name',
+  age: 'Age',
+  agePlaceholder: 'Enter your age',
+  ageMinorNotice: 'Since you are under 18, please review and acknowledge the consent statement below.',
+  gender: 'Gender',
+  selectGender: 'Select gender',
+  genderMale: 'Male',
+  genderFemale: 'Female',
+  genderNonBinary: 'Non-binary',
+  genderPreferNotToSay: 'Prefer not to say',
   preferredLanguage: 'Preferred Language',
   preferredLanguageHint: 'Your dashboard and quizzes will be shown in this language. You can change it later from your dashboard.',
   email: 'Email',
@@ -135,6 +147,21 @@ const LanguageIcon = () => (
   </svg>
 );
 
+const CalendarIcon = () => (
+  <svg {...iconProps}>
+    <rect x="3" y="4.5" width="18" height="16" rx="2.5" />
+    <path d="M3 9.5h18M8 2.5v4M16 2.5v4" />
+  </svg>
+);
+
+const UsersIcon = () => (
+  <svg {...iconProps}>
+    <circle cx="9" cy="8" r="3.5" />
+    <path d="M2.5 21v-1.5A4.5 4.5 0 0 1 7 15h4a4.5 4.5 0 0 1 4.5 4.5V21" />
+    <path d="M16.5 8.5a3 3 0 1 1 2.7 4.35M21.5 21v-1.2a4 4 0 0 0-3-3.87" />
+  </svg>
+);
+
 const BuildingIcon = () => (
   <svg {...iconProps}>
     <rect x="4" y="3" width="16" height="18" rx="2" />
@@ -184,7 +211,16 @@ function AuthPage() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [userName, setUserName] = useState('')
+  const [age, setAge] = useState('')
+  const [gender, setGender] = useState('')
   const [profile, setProfile] = useState('')
+  // Guardian consent, required only while the signer is 13-17 (derived from
+  // the entered age below) — never a manually-picked minor/adult toggle.
+  const [guardianConsent, setGuardianConsent] = useState(emptyGuardianConsent())
+  const [showGuardianValidation, setShowGuardianValidation] = useState(false)
+  const ageNum = age.trim() ? Number(age) : null
+  const ageCategory = getAgeCategory(ageNum)
+  const isMinor = ageCategory === 'minor'
   // Preferred language chosen during Sign-Up. Seeded from (and kept in sync
   // with) the app-wide language so the choice carries into the dashboard.
   const [preferredLanguage, setPreferredLanguage] = useState(language)
@@ -333,6 +369,11 @@ function AuthPage() {
           hasError = true;
           return;
         }
+        if (!age.trim() || isNaN(ageNum) || ageNum < MIN_SIGNUP_AGE || ageNum > MAX_SIGNUP_AGE) {
+          setError(`Please enter a valid age (${MIN_SIGNUP_AGE}-${MAX_SIGNUP_AGE}).`);
+          hasError = true;
+          return;
+        }
         if (!email.trim()) {
           setError(UI_TEXT.enterEmail);
           hasError = true;
@@ -345,6 +386,14 @@ function AuthPage() {
         }
         if (!password.trim()) {
           setError(UI_TEXT.enterPassword);
+          hasError = true;
+          return;
+        }
+        // Users aged 13-17 must have a complete, acknowledged Parent/Guardian
+        // Information & Consent section before signup can proceed.
+        if (isMinor && !isConsentComplete(guardianConsent)) {
+          setShowGuardianValidation(true);
+          setError(GUARDIAN_CONSENT_BLOCKED_MESSAGE);
           hasError = true;
           return;
         }
@@ -379,13 +428,23 @@ function AuthPage() {
             role: userRole,
             userName: userName,
             user_name: userName,
+            age: ageNum,
+            // Optional; omitted entirely when left unselected since the API
+            // only accepts one of its exact allowed gender strings.
+            ...(gender ? { gender } : {}),
             profile: profile,
             userCode: trimmedCode ? trimmedCode.toUpperCase() : '',
             organization: verifiedOrgName || 'Individual',
             // Preferred language chosen during registration (both casings for
             // whichever the backend validator expects).
             preferredLanguage: preferredLanguage,
-            preferred_language: preferredLanguage
+            preferred_language: preferredLanguage,
+            // Only present for 13-17 signups; records that the minor
+            // acknowledged having informed their parent/guardian.
+            ...(isMinor ? {
+              isMinor: true,
+              guardianConsentAcknowledged: guardianConsent.acknowledged,
+            } : {})
           })
         });
 
@@ -409,6 +468,11 @@ function AuthPage() {
           // Persist the language chosen during registration so it's already
           // active when the user logs in and lands on their dashboard.
           setLanguage(preferredLanguage);
+          // Remember consent locally against this email so the assessment
+          // flow (QuizAttempt) doesn't ask the same parent/guardian again.
+          if (isMinor) {
+            saveGuardianConsent(email, { ...guardianConsent, age: ageNum });
+          }
           setSuccess('Account created successfully! Redirecting to sign-in...');
           // Clear form and switch to sign-in tab after successful signup
           setTimeout(() => {
@@ -417,7 +481,11 @@ function AuthPage() {
             setEmail('');
             setPassword('');
             setUserName('');
+            setAge('');
+            setGender('');
             setProfile('');
+            setGuardianConsent(emptyGuardianConsent());
+            setShowGuardianValidation(false);
             setRegistrationType('individual');
             setOrganization(''); // Clear organization field
             setOnboardingCode('');
@@ -515,7 +583,11 @@ function AuthPage() {
       setPassword('');
       setShowPassword(false);
       setUserName('');
+      setAge('');
+      setGender('');
       setProfile('');
+      setGuardianConsent(emptyGuardianConsent());
+      setShowGuardianValidation(false);
       setRegistrationType(newValue === 1 ? 'individual' : '');
       setOrganization('');
       setError('');
@@ -529,6 +601,7 @@ function AuthPage() {
   // screen (errors, success messages, the resolved org name, profile options).
   const authTexts = [
     ...Object.values(UI_TEXT),
+    ...GUARDIAN_CONSENT_STRINGS,
     error,
     success,
     codeVerificationError,
@@ -656,6 +729,56 @@ function AuthPage() {
                             onChange={(e) => setUserName(e.target.value)}
                             required
                           />
+                        </div>
+                      </div>
+
+                      <div className="auth-field">
+                        <label className="auth-field__label" htmlFor="auth-age">{t('age')}</label>
+                        <div className="auth-field__control">
+                          <span className="auth-field__icon" aria-hidden="true"><CalendarIcon /></span>
+                          <input
+                            id="auth-age"
+                            className="auth-input"
+                            type="number"
+                            min={MIN_SIGNUP_AGE}
+                            max={MAX_SIGNUP_AGE}
+                            autoComplete="off"
+                            placeholder={t('agePlaceholder')}
+                            value={age}
+                            onChange={(e) => setAge(e.target.value)}
+                            required
+                          />
+                        </div>
+                        {isMinor && (
+                          <p className="auth-field__hint auth-field__hint--success">{t('ageMinorNotice')}</p>
+                        )}
+                      </div>
+
+                      {isMinor && (
+                        <ParentGuardianConsent
+                          value={guardianConsent}
+                          onChange={setGuardianConsent}
+                          showValidation={showGuardianValidation}
+                          tx={tx}
+                        />
+                      )}
+
+                      <div className="auth-field">
+                        <label className="auth-field__label" htmlFor="auth-gender">{t('gender')}</label>
+                        <div className="auth-field__control">
+                          <span className="auth-field__icon" aria-hidden="true"><UsersIcon /></span>
+                          <select
+                            id="auth-gender"
+                            className="auth-select"
+                            value={gender}
+                            onChange={(e) => setGender(e.target.value)}
+                          >
+                            <option value="">{t('selectGender')}</option>
+                            <option value="Male">{t('genderMale')}</option>
+                            <option value="Female">{t('genderFemale')}</option>
+                            <option value="Non-binary">{t('genderNonBinary')}</option>
+                            <option value="Prefer not to say">{t('genderPreferNotToSay')}</option>
+                          </select>
                         </div>
                       </div>
 
@@ -830,6 +953,7 @@ function AuthPage() {
                       loading ||
                       (tab === TAB_SIGNUP && (
                         !userName.trim() ||
+                        !age.trim() ||
                         !email.trim() ||
                         !profile ||
                         !password.trim() ||

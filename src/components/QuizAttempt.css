@@ -383,6 +383,14 @@
   box-shadow: 0 12px 20px rgba(142, 102, 241, 0.4);
 }
 
+.quiz-attempt__guardian-warning {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-destructive);
+  text-align: center;
+}
+
 /* Row holding Start + "Choose your own Language" side by side */
 .quiz-attempt__start-actions {
   display: flex;
