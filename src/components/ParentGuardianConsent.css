@@ -1,0 +1,42 @@
+/* Parent/Guardian Consent — shared by the signup flow (AuthPage) and the
+   assessment start flow (QuizAttempt), so a minor sees the exact same
+   acknowledgement, wording and validation wherever it appears. Uses the
+   global brand tokens from global.css rather than any page-scoped classes so
+   it drops cleanly into either surface. */
+
+.guardian-consent {
+  margin: var(--space-5) 0;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-tertiary);
+}
+
+.guardian-consent__error {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-xs, 12px);
+  color: var(--color-destructive);
+}
+
+.guardian-consent__checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-fg);
+  cursor: pointer;
+}
+
+.guardian-consent__checkbox-row input[type='checkbox'] {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}

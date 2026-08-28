@@ -364,10 +364,13 @@ export const userApi = {
   // --- Access-control: user management (role-gated on the server) ---
 
   // Admin/Super Admin: add a user with initial password + dashboard views.
-  async createUser({ email, password, user_name, profile, role = 'user', permissions = [], organization_id = null }) {
+  async createUser({ email, password, user_name, profile, role = 'user', permissions = [], organization_id = null, gender }) {
     return await apiCall('/admin/users', {
       method: 'POST',
-      body: JSON.stringify({ email, password, user_name, profile, role, permissions, organization_id }),
+      body: JSON.stringify({
+        email, password, user_name, profile, role, permissions, organization_id,
+        ...(gender ? { gender } : {}),
+      }),
     });
   },
 
