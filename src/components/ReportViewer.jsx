@@ -152,6 +152,84 @@ const splitAtContactDetails = (text) => {
   return [lines.slice(0, idx).join('\n').trim(), lines.slice(idx).join('\n').trim()];
 };
 
+// Service page URLs on the main website (used for Score Table links)
+const SERVICE_PAGE_LINKS = {
+  happilife: 'https://happimynd.com/v2/services?service=happilife',
+  happiself: 'https://happimynd.com/v2/services?service=happiself',
+  happibuddy: 'https://happimynd.com/v2/services?service=happibuddy',
+  happilearn: 'https://happimynd.com/v2/services?service=happilearn',
+  solv: 'https://happimynd.com/v2/services?service=solv',
+  happitalk: 'https://happimynd.com/v2/services?service=happitalk'
+};
+
+// View Plans page URLs for users to directly buy services (used for Next Steps / Support Services)
+const VIEW_PLANS_LINKS = {
+  happiself: 'https://happimynd.com/v2/services/happiself',
+  happibuddy: 'https://happimynd.com/v2/services/happibuddy',
+  happilearn: 'https://happimynd.com/v2/services/happilearn',
+  happitalk: 'https://happimynd.com/v2/services/happitalk',
+  solv: 'https://happimynd.com/v2/services/solv',
+  happiguide: 'https://happimynd.com/v2/services/happiself',
+  happilife: 'https://happimynd.com/v2/services/happilife'
+};
+
+const getViewPlansUrl = (serviceName) => {
+  const key = String(serviceName || '').toLowerCase().replace(/[^a-z]/g, '');
+  return VIEW_PLANS_LINKS[key] || 'https://happimynd.com/v2/services/happiself';
+};
+
+// Helper to attach service page links to services mentioned in the Score Table markdown
+const attachServiceLinksToScoreTable = (text) => {
+  if (!text) return '';
+  const lines = text.split('\n');
+  const services = [
+    { name: 'HappiLEARN', url: 'https://happimynd.com/v2/services?service=happilearn' },
+    { name: 'HappiBUDDY', url: 'https://happimynd.com/v2/services?service=happibuddy' },
+    { name: 'HappiSELF', url: 'https://happimynd.com/v2/services?service=happiself' },
+    { name: 'HappiTALK', url: 'https://happimynd.com/v2/services?service=happitalk' },
+    { name: 'HappiLIFE', url: 'https://happimynd.com/v2/services?service=happilife' },
+    { name: 'SOLV', url: 'https://happimynd.com/v2/services?service=solv' }
+  ];
+
+  return lines.map((line) => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('|')) {
+      const cells = line.split('|');
+      return cells.map((cell) => {
+        if (cell.includes('http://') || cell.includes('https://') || cell.includes('](')) {
+          return cell;
+        }
+        let updatedCell = cell;
+        services.forEach(({ name, url }) => {
+          const regex = new RegExp(`\\b${name}\\b`, 'gi');
+          updatedCell = updatedCell.replace(regex, `[${name}](${url})`);
+        });
+        return updatedCell;
+      }).join('|');
+    }
+    return line;
+  }).join('\n');
+};
+
+const markdownComponents = {
+  a: ({ node, href, children, ...props }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{
+        color: 'var(--color-primary, #8E66F1)',
+        fontWeight: 600,
+        textDecoration: 'underline',
+        textUnderlineOffset: '3px'
+      }}
+      {...props}
+    >
+      {children}
+    </a>
+  )
+};
+
 const defaultTemplate = {
   header: {
     enabled: true,
@@ -1226,13 +1304,16 @@ const ReportViewer = () => {
       {/* Custom Header Text — the "Score Table" section is HappiEQ-only, so it
           is stripped from every other assessment's header. */}
       {quiz?.report_header && (() => {
-        const headerMarkdown = isHappiEQ
+        let headerMarkdown = isHappiEQ
           ? quiz.report_header
           : stripScoreTableSection(quiz.report_header);
+        if (isHappiEQ && headerMarkdown) {
+          headerMarkdown = attachServiceLinksToScoreTable(headerMarkdown);
+        }
         return headerMarkdown ? (
           <div className="rv-card rv-card--intro">
             <div className="rv-markdown-content animate-fade-in">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{headerMarkdown}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{headerMarkdown}</ReactMarkdown>
             </div>
           </div>
         ) : null;
@@ -1547,6 +1628,9 @@ const ReportViewer = () => {
           : quiz.report_footer;
         // The Score Table is HappiEQ-only — strip it from every other report.
         if (!isHappiEQ) footerMarkdown = stripScoreTableSection(footerMarkdown);
+        if (isHappiEQ && footerMarkdown) {
+          footerMarkdown = attachServiceLinksToScoreTable(footerMarkdown);
+        }
         // Support Services is rendered as styled cards below, so drop the plain
         // markdown version from the footer for every assessment.
         footerMarkdown = stripSupportServicesSection(footerMarkdown);
@@ -1560,12 +1644,40 @@ const ReportViewer = () => {
           <div className="rv-card">
             <h3 style={{ fontWeight: 800, color: 'var(--color-primary)', fontSize: '18px', margin: '0 0 16px 0' }}>🤝 Support Services:</h3>
             <div className="rv-service-grid">
-              {getServiceList().map((service) => (
-                <div key={service.name} className="rv-service-card">
-                  <h4 className="rv-service-card__name">{service.name}</h4>
-                  <p className="rv-service-card__desc">{service.desc}</p>
-                </div>
-              ))}
+              {getServiceList().map((service) => {
+                const planUrl = getViewPlansUrl(service.name);
+                return (
+                  <div
+                    key={service.name}
+                    className="rv-service-card"
+                    onClick={() => window.open(planUrl, '_blank', 'noopener,noreferrer')}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <div className="rv-service-card__header">
+                      <h4 className="rv-service-card__name">
+                        <a
+                          href={planUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {service.name}
+                        </a>
+                      </h4>
+                      <a
+                        href={planUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rv-service-card__view-plans"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        View Plans →
+                      </a>
+                    </div>
+                    <p className="rv-service-card__desc">{service.desc}</p>
+                  </div>
+                );
+              })}
             </div>
           </div>
         ) : null;
@@ -1579,7 +1691,7 @@ const ReportViewer = () => {
             {beforeContact.trim() && (
               <div className="rv-card">
                 <div className="rv-markdown-content">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{beforeContact}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{beforeContact}</ReactMarkdown>
                 </div>
               </div>
             )}
@@ -1587,7 +1699,7 @@ const ReportViewer = () => {
             {contactOnward.trim() && (
               <div className="rv-card">
                 <div className="rv-markdown-content">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{contactOnward}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{contactOnward}</ReactMarkdown>
                 </div>
               </div>
             )}
@@ -1617,12 +1729,40 @@ const ReportViewer = () => {
           <h3 style={{ fontWeight: 800, color: 'var(--color-primary)', fontSize: '18px', margin: '0 0 16px 0' }}>🤝 Support Services:</h3>
 
           <div className="rv-service-grid">
-            {getServiceList().map((service) => (
-              <div key={service.name} className="rv-service-card">
-                <h4 className="rv-service-card__name">{service.name}</h4>
-                <p className="rv-service-card__desc">{service.desc}</p>
-              </div>
-            ))}
+            {getServiceList().map((service) => {
+              const planUrl = getViewPlansUrl(service.name);
+              return (
+                <div
+                  key={service.name}
+                  className="rv-service-card"
+                  onClick={() => window.open(planUrl, '_blank', 'noopener,noreferrer')}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <div className="rv-service-card__header">
+                    <h4 className="rv-service-card__name">
+                      <a
+                        href={planUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {service.name}
+                      </a>
+                    </h4>
+                    <a
+                      href={planUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rv-service-card__view-plans"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      View Plans →
+                    </a>
+                  </div>
+                  <p className="rv-service-card__desc">{service.desc}</p>
+                </div>
+              );
+            })}
           </div>
 
           {renderContactDetails()}
