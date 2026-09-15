@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDatabase } from '../../hooks/useDatabase';
-import { quizPacketApi } from '../../services/api';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useTranslatedContent } from '../../hooks/useTranslatedContent';
 import WhatsAppButton from '../WhatsAppButton';
@@ -42,7 +41,6 @@ import {
   Person as PersonIcon,
   Email as EmailIcon,
   Visibility as VisibilityIcon,
-  AccessTime as AccessTimeIcon,
   Event as EventIcon,
   HourglassEmpty as HourglassEmptyIcon
 } from '@mui/icons-material';
@@ -154,43 +152,6 @@ const UserDashboard = ({ setTab }) => {
 
     return { mappedCount, takenCount, totalAttemptsCount };
   }, [allowedQuizIds, filteredUserQuizAttempts]);
-
-  // Estimate time the same way the admin's Assessment Results does: based on the
-  // quiz's question count (≈40s per question), not the stale stored time_limit.
-  const estimateTimeLimit = (questionCount) => {
-    if (!questionCount || questionCount <= 0) return 'N/A';
-    return `${Math.ceil((questionCount * 40) / 60)} min`;
-  };
-
-  // Question count per assigned quiz (sum of questions across its packets),
-  // fetched the same way the admin dashboard does, so the displayed time matches.
-  const [questionCounts, setQuestionCounts] = useState({});
-  useEffect(() => {
-    const ids = [...new Set(assignedQuizzes.map(a => a.quiz_id))];
-    if (ids.length === 0) return;
-
-    let cancelled = false;
-    const loadCounts = async () => {
-      const entries = await Promise.all(
-        ids.map(async (id) => {
-          try {
-            const packetsData = await quizPacketApi.getQuizPackets(id);
-            const count = (packetsData || []).reduce(
-              (sum, packet) => sum + (packet.questions ? packet.questions.length : 0),
-              0
-            );
-            return [id, count];
-          } catch {
-            return [id, 0];
-          }
-        })
-      );
-      if (!cancelled) setQuestionCounts(Object.fromEntries(entries));
-    };
-
-    loadCounts();
-    return () => { cancelled = true; };
-  }, [assignedQuizzes]);
 
   const formatDate = (dateString) => {
     if (!dateString) return 'Unknown date';
@@ -371,11 +332,6 @@ const UserDashboard = ({ setTab }) => {
                         {incompleteAttempt && (
                           <span className="badge badge--warning" style={{ display: 'flex', alignItems: 'center' }}>
                             <HourglassEmptyIcon sx={{ fontSize: 14, mr: 0.5 }} /> {t('pending')}
-                          </span>
-                        )}
-                        {questionCounts[assignment.quiz_id] > 0 && (
-                          <span className="badge badge--outline" style={{ display: 'flex', alignItems: 'center' }}>
-                            <AccessTimeIcon sx={{ fontSize: 16, mr: 0.5 }} /> {estimateTimeLimit(questionCounts[assignment.quiz_id])}
                           </span>
                         )}
                       </div>

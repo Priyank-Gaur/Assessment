@@ -13,7 +13,8 @@ import {
   Info as InfoIcon,
   Warning as WarningIcon,
   VpnKey as VpnKeyIcon,
-  ContentCopy as ContentCopyIcon
+  ContentCopy as ContentCopyIcon,
+  Download as DownloadIcon
 } from '@mui/icons-material';
 import * as XLSX from 'xlsx';
 import { codeGenerationApi } from '../services/api';
@@ -70,6 +71,7 @@ const OrganizationManager = ({
   const [searchEmployeeQuery, setSearchEmployeeQuery] = useState('');
   const [excelFile, setExcelFile] = useState(null);
   const [previewRows, setPreviewRows] = useState([]);
+  const [previewFilter, setPreviewFilter] = useState('all'); // 'all' | 'valid' | 'errors'
   const [importSummary, setImportSummary] = useState(null);
 
   // Manual Add Employee State
@@ -271,6 +273,7 @@ const OrganizationManager = ({
     setViewingOrg(null);
     setExcelFile(null);
     setPreviewRows([]);
+    setPreviewFilter('all');
     setImportSummary(null);
     setIsManualAddMode(false);
   };
@@ -279,6 +282,7 @@ const OrganizationManager = ({
     const file = e.target.files[0];
     if (!file) return;
     setExcelFile(file);
+    setPreviewFilter('all');
     setImportSummary(null);
     
     const reader = new FileReader();
@@ -312,7 +316,7 @@ const OrganizationManager = ({
         // Get existing employee emails for this organization to check duplicates
         const existingEmails = new Set(
           (employees || [])
-            .filter(emp => emp.organization_id === viewingOrg.id)
+            .filter(emp => emp.organization_id === viewingOrg.id && emp.email)
             .map(emp => emp.email.toLowerCase())
         );
 
@@ -361,11 +365,8 @@ const OrganizationManager = ({
               errors.push('Missing Name');
             }
 
-            // Validation: Email is mandatory
-            if (!email) {
-              errors.push('Missing Email');
-            } else {
-              // Validation: Email format check
+            // Validation: Email is optional. If provided, check format and duplicates
+            if (email) {
               if (!emailRegex.test(email)) {
                 errors.push('Invalid Email Format');
               } else {
@@ -422,6 +423,29 @@ const OrganizationManager = ({
     reader.readAsArrayBuffer(file);
   };
 
+  const handleExportErrors = () => {
+    const errorRows = previewRows.filter(r => !r.isValid);
+    if (errorRows.length === 0) {
+      alert('No errors found to export.');
+      return;
+    }
+
+    const exportData = errorRows.map(r => ({
+      'Excel Row': r.rowNumber,
+      'Name': r.name || '',
+      'Email': r.email || '',
+      'Code': r.code || '',
+      'Error Reasons': r.errors.join('; '),
+      ...(r.metadata || {})
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Import Errors');
+    const safeOrgName = (viewingOrg?.name || 'Organization').replace(/[^a-zA-Z0-9_-]/g, '_');
+    XLSX.writeFile(workbook, `${safeOrgName}_import_errors.xlsx`);
+  };
+
   const handleSaveImport = async () => {
     // A duplicate Code anywhere in the file blocks the entire upload -
     // no records are imported until the file is fixed and re-uploaded.
@@ -446,7 +470,7 @@ const OrganizationManager = ({
       setEmployeesLoading(true);
       const employeesToSave = validRows.map(r => ({
         name: r.name,
-        email: r.email,
+        email: r.email?.trim() ? r.email.trim() : null,
         metadata: r.metadata,
         ...(r.code ? { code: r.code } : {})
       }));
@@ -463,6 +487,7 @@ const OrganizationManager = ({
 
       // Clear file upload input state and preview
       setPreviewRows([]);
+      setPreviewFilter('all');
       setExcelFile(null);
     } catch (err) {
       console.error('Import failed:', err);
@@ -497,7 +522,7 @@ const OrganizationManager = ({
     // Check duplicate in organization (client-side validation for responsiveness)
     const existingEmails = new Set(
       (employees || [])
-        .filter(emp => emp.organization_id === viewingOrg.id)
+        .filter(emp => emp.organization_id === viewingOrg.id && emp.email)
         .map(emp => emp.email.toLowerCase())
     );
     if (existingEmails.has(email.toLowerCase())) {
@@ -1059,7 +1084,7 @@ const OrganizationManager = ({
                           lineHeight: '1.4',
                           marginBottom: 'var(--space-4)'
                         }}>
-                          <span style={{ fontWeight: 600, color: 'var(--color-primary)' }}>Important Note:</span> Name and Email are mandatory fields in the Excel sheet when importing employees for the organization.
+                          <span style={{ fontWeight: 600, color: 'var(--color-primary)' }}>Important Note:</span> Name is a mandatory field in the Excel sheet. Email is optional — if omitted, employees can register their email using their unique Code during signup.
                         </div>
                         {!excelFile ? (
                           /* UPLOAD DROP BOX */
@@ -1098,116 +1123,211 @@ const OrganizationManager = ({
                         ) : (
                           /* PREVIEW DATA GRID & SUMMARY */
                           <div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-                              <div style={{ fontSize: 'var(--text-sm)' }}>
-                                File: <strong>{excelFile.name}</strong> 
-                                <span style={{ color: 'var(--color-muted-fg)', marginLeft: 'var(--space-3)' }}>
-                                  ({previewRows.length} parsed rows)
-                                </span>
-                              </div>
-                              <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-                                <span className="badge badge--success">
-                                  Valid: {previewRows.filter(r => r.isValid).length}
-                                </span>
-                                <span className="badge badge--error">
-                                  Errors: {previewRows.filter(r => !r.isValid).length}
-                                </span>
-                              </div>
-                            </div>
+                            {(() => {
+                              const validCount = previewRows.filter(r => r.isValid).length;
+                              const errorCount = previewRows.filter(r => !r.isValid).length;
+                              const displayedRows = previewRows.filter(r => {
+                                if (previewFilter === 'errors') return !r.isValid;
+                                if (previewFilter === 'valid') return r.isValid;
+                                return true;
+                              });
+                              // Limit rendered rows to first 300 for browser responsiveness with 4000+ entries
+                              const visibleRows = displayedRows.slice(0, 300);
 
-                            {/* Preview Table Container */}
-                            <div style={{ maxHeight: '350px', overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', marginBottom: 'var(--space-4)' }}>
-                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-xs)', textAlign: 'left' }}>
-                                <thead style={{ background: 'var(--color-bg)', position: 'sticky', top: 0, zIndex: 1, borderBottom: '1px solid var(--color-border)' }}>
-                                  <tr>
-                                    <th style={{ padding: '8px var(--space-2)', fontWeight: 600 }}>Row</th>
-                                    <th style={{ padding: '8px var(--space-2)', fontWeight: 600 }}>Name</th>
-                                    <th style={{ padding: '8px var(--space-2)', fontWeight: 600 }}>Email</th>
-                                    <th style={{ padding: '8px var(--space-2)', fontWeight: 600 }}>Code</th>
-                                    <th style={{ padding: '8px var(--space-2)', fontWeight: 600 }}>Attributes</th>
-                                    <th style={{ padding: '8px var(--space-2)', fontWeight: 600 }}>Status</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {previewRows.map((row, idx) => (
-                                    <tr 
-                                      key={idx} 
-                                      style={{ 
-                                        borderBottom: '1px solid var(--color-border)', 
-                                        backgroundColor: row.isValid ? 'transparent' : 'rgba(239,68,68,0.05)' 
-                                      }}
-                                    >
-                                      <td style={{ padding: '8px var(--space-2)', color: 'var(--color-muted-fg)' }}>{row.rowNumber}</td>
-                                      <td style={{ padding: '8px var(--space-2)', fontWeight: 500, color: row.name ? 'inherit' : 'var(--color-muted-fg)' }}>
-                                        {row.name || '(Empty)'}
-                                      </td>
-                                      <td style={{ padding: '8px var(--space-2)', color: row.email ? 'inherit' : 'var(--color-muted-fg)' }}>
-                                        {row.email || '(Empty)'}
-                                      </td>
-                                      <td style={{ padding: '8px var(--space-2)', color: row.code ? 'inherit' : 'var(--color-muted-fg)' }}>
-                                        {row.code || <em>(auto)</em>}
-                                      </td>
-                                      <td style={{ padding: '8px var(--space-2)' }}>
-                                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                                          {Object.entries(row.metadata).map(([k, v]) => (
-                                            <span 
-                                              key={k} 
-                                              title={`${k}: ${v}`}
+                              return (
+                                <>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+                                    <div style={{ fontSize: 'var(--text-sm)' }}>
+                                      File: <strong>{excelFile.name}</strong> 
+                                      <span style={{ color: 'var(--color-muted-fg)', marginLeft: 'var(--space-3)' }}>
+                                        ({previewRows.length} total rows)
+                                      </span>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+                                      {/* View Filter Switcher */}
+                                      <div style={{ display: 'inline-flex', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', overflow: 'hidden', fontSize: 'var(--text-xs)' }}>
+                                        <button
+                                          type="button"
+                                          onClick={() => setPreviewFilter('all')}
+                                          style={{
+                                            padding: '4px 10px',
+                                            border: 'none',
+                                            cursor: 'pointer',
+                                            background: previewFilter === 'all' ? 'var(--color-primary)' : 'var(--color-bg)',
+                                            color: previewFilter === 'all' ? '#fff' : 'var(--color-fg)',
+                                            fontWeight: previewFilter === 'all' ? 600 : 500
+                                          }}
+                                        >
+                                          All ({previewRows.length})
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setPreviewFilter('valid')}
+                                          style={{
+                                            padding: '4px 10px',
+                                            border: 'none',
+                                            borderLeft: '1px solid var(--color-border)',
+                                            cursor: 'pointer',
+                                            background: previewFilter === 'valid' ? 'var(--color-success)' : 'var(--color-bg)',
+                                            color: previewFilter === 'valid' ? '#fff' : 'var(--color-fg)',
+                                            fontWeight: previewFilter === 'valid' ? 600 : 500
+                                          }}
+                                        >
+                                          Valid ({validCount})
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setPreviewFilter('errors')}
+                                          style={{
+                                            padding: '4px 10px',
+                                            border: 'none',
+                                            borderLeft: '1px solid var(--color-border)',
+                                            cursor: 'pointer',
+                                            background: previewFilter === 'errors' ? 'var(--color-destructive)' : 'var(--color-bg)',
+                                            color: previewFilter === 'errors' ? '#fff' : (errorCount > 0 ? 'var(--color-destructive)' : 'var(--color-fg)'),
+                                            fontWeight: (previewFilter === 'errors' || errorCount > 0) ? 600 : 500
+                                          }}
+                                        >
+                                          Errors ({errorCount})
+                                        </button>
+                                      </div>
+
+                                      {/* Export Errors Button */}
+                                      {errorCount > 0 && (
+                                        <button
+                                          type="button"
+                                          className="btn btn--outline"
+                                          onClick={handleExportErrors}
+                                          style={{
+                                            padding: '3px 10px',
+                                            fontSize: 'var(--text-xs)',
+                                            height: '28px',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '5px',
+                                            borderColor: 'var(--color-destructive)',
+                                            color: 'var(--color-destructive)'
+                                          }}
+                                          title="Download spreadsheet of only the failed rows with exact error reasons"
+                                        >
+                                          <DownloadIcon style={{ fontSize: '15px' }} />
+                                          Export Errors ({errorCount})
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Performance note if rows exceed 300 */}
+                                  {displayedRows.length > 300 && (
+                                    <div style={{ fontSize: '11px', color: 'var(--color-muted-fg)', marginBottom: 'var(--space-2)' }}>
+                                      Showing first 300 of {displayedRows.length} {previewFilter === 'errors' ? 'error ' : ''}rows to maintain responsiveness. {errorCount > 0 && 'Use "Export Errors" to inspect all failed records.'}
+                                    </div>
+                                  )}
+
+                                  {/* Preview Table Container */}
+                                  <div style={{ maxHeight: '350px', overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', marginBottom: 'var(--space-4)' }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-xs)', textAlign: 'left' }}>
+                                      <thead style={{ background: 'var(--color-bg)', position: 'sticky', top: 0, zIndex: 1, borderBottom: '1px solid var(--color-border)' }}>
+                                        <tr>
+                                          <th style={{ padding: '8px var(--space-2)', fontWeight: 600 }}>Row</th>
+                                          <th style={{ padding: '8px var(--space-2)', fontWeight: 600 }}>Name</th>
+                                          <th style={{ padding: '8px var(--space-2)', fontWeight: 600 }}>Email</th>
+                                          <th style={{ padding: '8px var(--space-2)', fontWeight: 600 }}>Code</th>
+                                          <th style={{ padding: '8px var(--space-2)', fontWeight: 600 }}>Attributes</th>
+                                          <th style={{ padding: '8px var(--space-2)', fontWeight: 600 }}>Status</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {visibleRows.length === 0 ? (
+                                          <tr>
+                                            <td colSpan={6} style={{ textAlign: 'center', padding: 'var(--space-6)', color: 'var(--color-muted-fg)' }}>
+                                              No rows match the "{previewFilter}" filter.
+                                            </td>
+                                          </tr>
+                                        ) : (
+                                          visibleRows.map((row, idx) => (
+                                            <tr 
+                                              key={idx} 
                                               style={{ 
-                                                fontSize: '10px', 
-                                                background: 'var(--color-bg)', 
-                                                padding: '2px 6px', 
-                                                borderRadius: '10px',
-                                                border: '1px solid var(--color-border)',
-                                                whiteSpace: 'nowrap',
-                                                textOverflow: 'ellipsis',
-                                                overflow: 'hidden',
-                                                maxWidth: '120px'
+                                                borderBottom: '1px solid var(--color-border)', 
+                                                backgroundColor: row.isValid ? 'transparent' : 'rgba(239,68,68,0.05)' 
                                               }}
                                             >
-                                              {k}: {String(v)}
-                                            </span>
-                                          ))}
-                                          {Object.keys(row.metadata).length === 0 && (
-                                            <span style={{ color: 'var(--color-muted-fg)', fontStyle: 'italic' }}>None</span>
-                                          )}
-                                        </div>
-                                      </td>
-                                      <td style={{ padding: '8px var(--space-2)', verticalAlign: 'middle' }}>
-                                        {row.isValid ? (
-                                          <span className="badge badge--success" style={{ padding: '2px 6px', fontSize: '10px' }}>Valid</span>
-                                        ) : (
-                                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                            {row.errors.map((err, errIdx) => (
-                                              <span 
-                                                key={errIdx} 
-                                                style={{ 
-                                                  color: 'var(--color-destructive)', 
-                                                  fontWeight: 600,
-                                                  display: 'inline-flex',
-                                                  alignItems: 'center',
-                                                  gap: '2px'
-                                                }}
-                                              >
-                                                <WarningIcon style={{ width: '10px', height: '10px' }} />
-                                                {err}
-                                              </span>
-                                            ))}
-                                          </div>
+                                              <td style={{ padding: '8px var(--space-2)', color: 'var(--color-muted-fg)' }}>{row.rowNumber}</td>
+                                              <td style={{ padding: '8px var(--space-2)', fontWeight: 500, color: row.name ? 'inherit' : 'var(--color-muted-fg)' }}>
+                                                {row.name || '(Empty)'}
+                                              </td>
+                                              <td style={{ padding: '8px var(--space-2)', color: row.email ? 'inherit' : 'var(--color-muted-fg)' }}>
+                                                {row.email || <span style={{ fontStyle: 'italic', opacity: 0.8 }}>Pending Signup</span>}
+                                              </td>
+                                              <td style={{ padding: '8px var(--space-2)', color: row.code ? 'inherit' : 'var(--color-muted-fg)' }}>
+                                                {row.code || <em>(auto)</em>}
+                                              </td>
+                                              <td style={{ padding: '8px var(--space-2)' }}>
+                                                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                                  {Object.entries(row.metadata).map(([k, v]) => (
+                                                    <span 
+                                                      key={k} 
+                                                      title={`${k}: ${v}`}
+                                                      style={{ 
+                                                        fontSize: '10px', 
+                                                        background: 'var(--color-bg)', 
+                                                        padding: '2px 6px', 
+                                                        borderRadius: '10px',
+                                                        border: '1px solid var(--color-border)',
+                                                        whiteSpace: 'nowrap',
+                                                        textOverflow: 'ellipsis',
+                                                        overflow: 'hidden',
+                                                        maxWidth: '120px'
+                                                      }}
+                                                    >
+                                                      {k}: {String(v)}
+                                                    </span>
+                                                  ))}
+                                                  {Object.keys(row.metadata).length === 0 && (
+                                                    <span style={{ color: 'var(--color-muted-fg)', fontStyle: 'italic' }}>None</span>
+                                                  )}
+                                                </div>
+                                              </td>
+                                              <td style={{ padding: '8px var(--space-2)', verticalAlign: 'middle' }}>
+                                                {row.isValid ? (
+                                                  <span className="badge badge--success" style={{ padding: '2px 6px', fontSize: '10px' }}>Valid</span>
+                                                ) : (
+                                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                                    {row.errors.map((err, errIdx) => (
+                                                      <span 
+                                                        key={errIdx} 
+                                                        style={{ 
+                                                          color: 'var(--color-destructive)', 
+                                                          fontWeight: 600,
+                                                          display: 'inline-flex',
+                                                          alignItems: 'center',
+                                                          gap: '2px'
+                                                        }}
+                                                      >
+                                                        <WarningIcon style={{ width: '10px', height: '10px' }} />
+                                                        {err}
+                                                      </span>
+                                                    ))}
+                                                  </div>
+                                                )}
+                                              </td>
+                                            </tr>
+                                          ))
                                         )}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </>
+                              );
+                            })()}
 
                             {/* Import Controls */}
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <button 
                                 type="button" 
                                 className="btn btn--outline" 
-                                onClick={() => { setExcelFile(null); setPreviewRows([]); }}
+                                onClick={() => { setExcelFile(null); setPreviewRows([]); setPreviewFilter('all'); }}
                               >
                                 Re-upload file
                               </button>
@@ -1216,7 +1336,7 @@ const OrganizationManager = ({
                                 <button 
                                   type="button" 
                                   className="btn btn--outline" 
-                                  onClick={() => { setExcelFile(null); setPreviewRows([]); setIsImportMode(false); }}
+                                  onClick={() => { setExcelFile(null); setPreviewRows([]); setPreviewFilter('all'); setIsImportMode(false); }}
                                 >
                                   Cancel
                                 </button>
@@ -1308,8 +1428,8 @@ const OrganizationManager = ({
                         const filteredEmployees = orgEmployees.filter(emp => {
                           const query = searchEmployeeQuery.toLowerCase();
                           return (
-                            emp.name.toLowerCase().includes(query) ||
-                            emp.email.toLowerCase().includes(query) ||
+                            (emp.name && emp.name.toLowerCase().includes(query)) ||
+                            (emp.email && emp.email.toLowerCase().includes(query)) ||
                             Object.values(emp.metadata || {}).some(v => 
                               String(v).toLowerCase().includes(query)
                             )
@@ -1385,7 +1505,9 @@ const OrganizationManager = ({
                                 {filteredEmployees.map((emp) => (
                                   <tr key={emp.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
                                     <td style={{ padding: 'var(--space-3)', fontWeight: 500 }}>{emp.name}</td>
-                                    <td style={{ padding: 'var(--space-3)' }}>{emp.email}</td>
+                                    <td style={{ padding: 'var(--space-3)' }}>
+                                      {emp.email || <span style={{ color: 'var(--color-muted-fg)', fontStyle: 'italic' }}>Pending Signup</span>}
+                                    </td>
                                     <td style={{ padding: 'var(--space-3)' }}>{emp.personal_email || (emp.metadata && emp.metadata.personal_email) || ''}</td>
                                     <td style={{ padding: 'var(--space-3)' }}>
                                       {emp.code ? (

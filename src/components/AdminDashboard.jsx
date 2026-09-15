@@ -16,6 +16,7 @@ import {
 import { useDatabase } from '../hooks/useDatabase'
 import { organizationApi, userApi, quizPacketApi, questionApi } from '../services/api'
 import { profileRank, PROFILE_ORDER } from '../utils/profileOrder'
+import QuizMultiSelect from './QuizMultiSelect'
 import './AdminDashboard.css'
 
 // Maximum score a single question can award. Mirrors the scoring used when a
@@ -72,11 +73,13 @@ const AdminDashboard = () => {
   const [attemptDateTo, setAttemptDateTo] = useState('')
   const [attemptOrgFilter, setAttemptOrgFilter] = useState('all')
   const [attemptSortBy, setAttemptSortBy] = useState('date_desc')
+  const [selectedAttemptQuizzes, setSelectedAttemptQuizzes] = useState([])
   const [incompleteSearch, setIncompleteSearch] = useState('')
   const [incompleteOrgFilter, setIncompleteOrgFilter] = useState('all')
   const [incompleteDateFrom, setIncompleteDateFrom] = useState('')
   const [incompleteDateTo, setIncompleteDateTo] = useState('')
   const [incompleteSortBy, setIncompleteSortBy] = useState('date_desc')
+  const [selectedIncompleteQuizzes, setSelectedIncompleteQuizzes] = useState([])
 
   const {
     allQuizAttempts,
@@ -558,6 +561,21 @@ const AdminDashboard = () => {
     return Array.from(orgs).sort()
   }, [userSummaries])
 
+  const availableQuizNames = useMemo(() => {
+    const names = new Set()
+    ;(quizzes || []).forEach(q => {
+      const name = q.name || q.title
+      if (name && String(name).trim()) names.add(String(name).trim())
+    })
+    ;(enrichedAttempts || []).forEach(a => {
+      const name = a.quiz?.name
+      if (name && name !== 'Unknown' && String(name).trim()) {
+        names.add(String(name).trim())
+      }
+    })
+    return Array.from(names).sort((a, b) => a.localeCompare(b))
+  }, [quizzes, enrichedAttempts])
+
   const filteredUserSummaries = useMemo(() => {
     let result = userSummaries
 
@@ -761,6 +779,11 @@ const AdminDashboard = () => {
   const filteredAttempts = useMemo(() => {
     let result = deduplicatedAttempts
 
+    // Filter by Quiz Names (Multi-Select)
+    if (selectedAttemptQuizzes.length > 0) {
+      result = result.filter(a => selectedAttemptQuizzes.includes(a.quiz?.name))
+    }
+
     // Filter by Attempt Date Range
     if (attemptDateFrom) {
       const fromTime = new Date(`${attemptDateFrom}T00:00:00`).getTime()
@@ -843,7 +866,7 @@ const AdminDashboard = () => {
           return timeB - timeA
       }
     })
-  }, [deduplicatedAttempts, searchTerm, filterStatus, attemptOrgFilter, attemptDateFrom, attemptDateTo, attemptSortBy])
+  }, [deduplicatedAttempts, searchTerm, filterStatus, attemptOrgFilter, attemptDateFrom, attemptDateTo, attemptSortBy, selectedAttemptQuizzes])
 
   const getOverallStats = () => {
     if (!deduplicatedAttempts || deduplicatedAttempts.length === 0) {
@@ -1038,6 +1061,13 @@ const AdminDashboard = () => {
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
+
+            <QuizMultiSelect
+              quizzes={availableQuizNames}
+              selected={selectedAttemptQuizzes}
+              onChange={setSelectedAttemptQuizzes}
+              placeholder="All Quizzes"
+            />
             
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <span style={{ fontSize: 'var(--text-xs, 12px)', fontWeight: 600, color: 'var(--color-muted-fg, #6b7280)' }}>Attempt Date:</span>
@@ -1167,7 +1197,7 @@ const AdminDashboard = () => {
               <span className="badge badge--primary" style={{ fontSize: '13px', padding: '0.2rem 0.65rem' }}>
                 {filteredAttempts.length}
               </span>
-              {(searchTerm || (attemptOrgFilter && attemptOrgFilter !== 'all') || filterStatus !== 'all' || attemptDateFrom || attemptDateTo) && (
+              {(searchTerm || (attemptOrgFilter && attemptOrgFilter !== 'all') || filterStatus !== 'all' || attemptDateFrom || attemptDateTo || selectedAttemptQuizzes.length > 0) && (
                 <span style={{ fontSize: 'var(--text-xs, 12px)', color: 'var(--color-muted-fg, #6b7280)', fontWeight: 400 }}>
                   (filtered from {deduplicatedAttempts.length} total)
                 </span>
@@ -1717,6 +1747,11 @@ const AdminDashboard = () => {
         const rawIncomplete = deduplicatedAttempts.filter(a => !isAttemptCompleted(a))
 
         const filteredIncomplete = rawIncomplete.filter(attempt => {
+          // Quiz filter (Multi-Select)
+          if (selectedIncompleteQuizzes.length > 0) {
+            if (!selectedIncompleteQuizzes.includes(attempt.quiz?.name)) return false
+          }
+
           // Search query matching user name, email, quiz name, profile name, or organization
           if (incompleteSearch.trim()) {
             const query = incompleteSearch.toLowerCase()
@@ -1791,6 +1826,13 @@ const AdminDashboard = () => {
                   onChange={(e) => setIncompleteSearch(e.target.value)}
                 />
               </div>
+
+              <QuizMultiSelect
+                quizzes={availableQuizNames}
+                selected={selectedIncompleteQuizzes}
+                onChange={setSelectedIncompleteQuizzes}
+                placeholder="All Quizzes"
+              />
               
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 'var(--text-xs, 12px)', fontWeight: 600, color: 'var(--color-muted-fg, #6b7280)' }}>Started Date:</span>
@@ -1895,7 +1937,7 @@ const AdminDashboard = () => {
                 <span className="badge badge--warning" style={{ fontSize: '13px', padding: '0.2rem 0.65rem' }}>
                   {filteredIncomplete.length}
                 </span>
-                {(incompleteSearch || (incompleteOrgFilter && incompleteOrgFilter !== 'all') || incompleteDateFrom || incompleteDateTo) && (
+                {(incompleteSearch || (incompleteOrgFilter && incompleteOrgFilter !== 'all') || incompleteDateFrom || incompleteDateTo || selectedIncompleteQuizzes.length > 0) && (
                   <span style={{ fontSize: 'var(--text-xs, 12px)', color: 'var(--color-muted-fg, #6b7280)', fontWeight: 400 }}>
                     (filtered from {rawIncomplete.length} total)
                   </span>

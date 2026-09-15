@@ -170,7 +170,8 @@ const VIEW_PLANS_LINKS = {
   happitalk: 'https://happimynd.com/v2/services/happitalk',
   solv: 'https://happimynd.com/v2/services/solv',
   happiguide: 'https://happimynd.com/v2/services/happiself',
-  happilife: 'https://happimynd.com/v2/services/happilife'
+  happilife: 'https://happimynd.com/v2/services/happilife',
+  games: 'https://happimynd.com/v2/games'
 };
 
 const getViewPlansUrl = (serviceName) => {
@@ -662,16 +663,18 @@ const ReportViewer = () => {
         { name: 'HappiLEARN', desc: "Your emotional wellbeing library—open 24/7. With HappiLEARN, you get unlimited access to 5000+ minutes of curated videos, audios, blogs, and tools designed by experts to practice empathy, regulation, and resilience at your own pace." },
         { name: 'HappiBUDDY', desc: "Confidential space to enhance your relational EQ because everyone needs someone to talk to or just a safe space to vent out our emotions. HappiBUDDY connects you with a trusted professional \"buddy\" in a safe, private, and judgment-free space so you never have to face challenges alone." },
         { name: 'HappiSELF', desc: "It offers interactive tools and guided practices that help you build awareness, balance and resilience in everyday life. These scientific methods are designed for everyday use that help you stay aligned and grounded to enable your growth." },
-        { name: 'HappiTALK', desc: "A safe space for real conversations, allowing you to have meaningful discussions with experts to improve communication, relationships, and emotional expression." }
+        { name: 'HappiTALK', desc: "A safe space for real conversations, allowing you to have meaningful discussions with experts to improve communication, relationships, and emotional expression." },
+        { name: 'Games', desc: "A fun space to play, unwind, and relax your mind." }
       ];
     }
     
     return [
       { name: 'SOLV', desc: "It provides one-on-one sessions with growth experts to help you navigate important life decisions, transitions, aspirations,and challenges. It's confidential and thoughtful environment for meaningful progress all from the comfort of your own space." },
-      { name: 'HappiLEARN', desc: 'is our online self-help library that enriches you with a 24*7 access to 5000+ minutes of curated, well researched content that includes video, audio, blogs and more.' },
-      { name: 'HappiBUDDY', desc: 'allows you to connect with a professional expert buddy in a personal emotional log room that is non-judgemental, anonymous, and 100% confidential.' },
+      { name: 'HappiLEARN', desc: 'It is our online self-help library that enriches you with a 24*7 access to 5000+ minutes of curated, well researched content that includes video, audio, blogs and more.' },
+      { name: 'HappiBUDDY', desc: 'It allows you to connect with a professional expert buddy in a personal emotional log room that is non-judgemental, anonymous, and 100% confidential.' },
       { name: 'HappiSELF', desc: "It offers interactive tools and guided practices that help you build awareness, balance and resilience in everyday life. These scientific methods are designed for everyday use that help you stay aligned and grounded to enable your growth." },
-      { name: 'HappiTALK', desc: 'offers you a safe space to discuss life, aspirations, personal issues, relationships and more with the best of our country’s experts from the comfort of your home.' }
+      { name: 'HappiTALK', desc: 'It offers you a safe space to discuss life, aspirations, personal issues, relationships and more with the best of our country’s experts from the comfort of your home.' },
+      { name: 'Games', desc: "A fun space to play, unwind, and relax your mind." }
     ];
   };
 
@@ -1671,7 +1674,7 @@ const ReportViewer = () => {
                         className="rv-service-card__view-plans"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        View Plans →
+                        {service.name === 'Games' ? 'Play Now →' : 'View Plans →'}
                       </a>
                     </div>
                     <p className="rv-service-card__desc">{service.desc}</p>
@@ -1756,7 +1759,7 @@ const ReportViewer = () => {
                       className="rv-service-card__view-plans"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      View Plans →
+                      {service.name === 'Games' ? 'Play Now →' : 'View Plans →'}
                     </a>
                   </div>
                   <p className="rv-service-card__desc">{service.desc}</p>
