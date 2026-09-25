@@ -1,15 +1,21 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Download as DownloadIcon,
   Assessment as AssessmentIcon,
   Search as SearchIcon,
-  FilterList as FilterIcon
+  FilterList as FilterIcon,
+  FolderZip as FolderZipIcon,
+  CheckCircle as CheckCircleIcon,
+  Error as ErrorIcon,
+  Warning as WarningIcon,
+  Close as CloseIcon
 } from '@mui/icons-material';
-import PDFGenerator from '../services/pdfGenerator';
+import JSZip from 'jszip';
+import ReportContent, { exportElementToPdfBlob, defaultTemplate } from './ReportContent';
 import './AssessmentReport.css';
 import { enrichQuizWithInstructions } from './QuizInstructionsMap';
 import { useDatabase } from '../hooks/useDatabase';
-import { quizPacketApi, userApi, questionApi, pdfTemplateApi } from '../services/api';
+import { quizPacketApi, userApi, pdfTemplateApi } from '../services/api';
 import { PROFILE_ORDER, isSameProfile } from '../utils/profileOrder';
 
 
@@ -19,6 +25,7 @@ const AssessmentReport = () => {
   const [selectedQuiz, setSelectedQuiz] = useState(null);
   const [quizAttempts, setQuizAttempts] = useState([]);
   const [quizPackets, setQuizPackets] = useState([]);
+  const [quizTemplate, setQuizTemplate] = useState(defaultTemplate);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -30,6 +37,13 @@ const AssessmentReport = () => {
   const [sortBy, setSortBy] = useState('date-desc');
   const [showDetails, setShowDetails] = useState(false);
   const [generatingPDF, setGeneratingPDF] = useState(false);
+  const [generatingAttemptId, setGeneratingAttemptId] = useState(null);
+  const [bulkDownloading, setBulkDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState({ current: 0, total: 0, message: '' });
+  const [bulkNotification, setBulkNotification] = useState(null);
+  const [activeRenderData, setActiveRenderData] = useState(null);
+  const abortDownloadRef = useRef(false);
+  const offscreenReportRef = useRef(null);
 
   const getProfileInfo = (attempt) => {
     // If we have user data from the enriched attempt, use it
@@ -164,6 +178,7 @@ const AssessmentReport = () => {
     try {
       setLoading(true);
       setError('');
+      enrichQuizWithInstructions(quiz);
       setSelectedQuiz(quiz);
       setSearchTerm('');
       setFilterStatus('all');
@@ -171,21 +186,15 @@ const AssessmentReport = () => {
       setFilterProfile('all');
       setSortBy('date-desc');
 
-      // Load quiz attempts and packets using API services to bypass proxy drops
-      const [attemptsData, packetsData] = await Promise.all([
+      // Load quiz attempts, packets, and template in parallel using API services
+      const [attemptsData, packetsData, templateResData] = await Promise.all([
         userApi.getAllQuizAttempts(),
-        quizPacketApi.getQuizPackets(quiz.id)
+        quizPacketApi.getQuizPackets(quiz.id),
+        pdfTemplateApi.getTemplate(quiz.id).catch(() => null)
       ]);
 
-      console.log('📦 Loaded packets data:', packetsData);
-      console.log('📦 First packet details:', packetsData[0] ? {
-        id: packetsData[0].id,
-        name: packetsData[0].name,
-        hasScoringScale: !!packetsData[0].scoringScale,
-        scoringScaleLength: packetsData[0].scoringScale?.length || 0,
-        enableScoringScale: packetsData[0].enableScoringScale,
-        scoringScale: packetsData[0].scoringScale
-      } : 'No packets found');
+      const templateData = templateResData?.template || templateResData || defaultTemplate;
+      setQuizTemplate(templateData);
 
       // Filter attempts for this specific quiz
       const quizAttemptsData = (attemptsData || []).filter(attempt => String(attempt.quiz_id) === String(quiz.id));
@@ -199,8 +208,11 @@ const AssessmentReport = () => {
         };
       });
 
+      setBulkDownloading(false);
+      setBulkNotification(null);
+      setActiveRenderData(null);
       setQuizAttempts(enrichedAttempts);
-      setQuizPackets(packetsData);
+      setQuizPackets(packetsData || []);
       setShowDetails(true);
     } catch (err) {
       setError(err.message);
@@ -209,170 +221,200 @@ const AssessmentReport = () => {
     }
   };
 
+  const renderAttemptToPdfBlob = async (attempt) => {
+    // 1. Get user data
+    let userData = attempt.user || attempt.userData;
+    if (!userData && attempt.user_id) {
+      userData = (users || []).find(u => String(u.id) === String(attempt.user_id));
+      if (!userData) {
+        try {
+          userData = await userApi.getUserById(attempt.user_id);
+        } catch (e) {
+          console.warn('Failed to fetch user by id:', e);
+        }
+      }
+    }
+
+    const quizObj = selectedQuiz ? { ...selectedQuiz } : null;
+    if (quizObj) enrichQuizWithInstructions(quizObj);
+
+    // 2. Set active render data so React mounts ReportContent into offscreen container
+    setActiveRenderData({
+      quiz: quizObj,
+      attempt,
+      user: userData || { user_name: 'User', email: 'No email' },
+      packets: quizPackets || [],
+      template: quizTemplate || defaultTemplate
+    });
+
+    // 3. Wait 500ms for React to mount and layout SVGs, emotion faces, and fonts
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // 4. Capture rendered element
+    const element = offscreenReportRef.current || document.getElementById('report-container');
+    if (!element) {
+      throw new Error('Report container element not found for rendering');
+    }
+
+    const { pdf, blob } = await exportElementToPdfBlob(element);
+
+    const safeUserName = (userData?.user_name || userData?.name || attempt.user?.name || attempt.user?.user_name || 'User')
+      .replace(/[/\\?%*:|"<>]/g, '_')
+      .trim() || 'User';
+    const safeQuizName = (quizObj?.name || 'Quiz')
+      .replace(/[/\\?%*:|"<>]/g, '_')
+      .trim() || 'Quiz';
+    const dateTag = attempt?.completed_at
+      ? new Date(attempt.completed_at).toISOString().split('T')[0]
+      : 'report';
+
+    const baseFileName = `${safeQuizName}_${safeUserName}_${dateTag}.pdf`;
+
+    return { pdf, pdfBlob: blob, baseFileName };
+  };
+
   const handleGeneratePDF = async (attempt) => {
     try {
       setGeneratingPDF(true);
+      setGeneratingAttemptId(attempt.id);
+      setError('');
       
-      // Get user data
-      let userData = attempt.userData;
-      if (!userData && attempt.user_id) {
-        const found = (users || []).find(u => String(u.id) === String(attempt.user_id));
-        if (found) {
-          userData = found;
-        } else if (attempt.user) {
-          userData = attempt.user;
-        } else {
-          try {
-            userData = await userApi.getUserById(attempt.user_id);
-          } catch (err) {
-            console.error('Failed to fetch user data:', err);
-          }
-        }
-      }
-      
-      // Get questions for all packets in this quiz using API service
-      const allQuestions = [];
-      for (const packet of quizPackets) {
-        try {
-          const questions = await questionApi.getQuestions(packet.id);
-          if (questions) {
-            allQuestions.push(...questions);
-          }
-        } catch (err) {
-          console.error(`Failed to fetch questions for packet ${packet.id}:`, err);
-        }
-      }
-
-      // Calculate packet scores
-      const packetScores = quizPackets.map(packet => {
-        const packetQuestions = allQuestions.filter(q => q.packet_id === packet.id);
-        const correct = packetQuestions.filter(q => {
-          return Math.random() > 0.5; // Mock: 50% chance of correct answer
-        }).length;
-        const total = packetQuestions.length;
-        const score = total > 0 ? Math.round((correct / total) * 100) : 0;
-        
-        // Calculate actual marks based on question marks
-        const totalPossibleMarks = packetQuestions.reduce((sum, q) => sum + (q.marks || 1), 0);
-        const earnedMarks = packetQuestions.filter((q, index) => {
-          return Math.random() > 0.5;
-        }).reduce((sum, q) => sum + (q.marks || 1), 0);
-        
-        return {
-          ...packet,
-          score,
-          correct,
-          total,
-          marks: earnedMarks, // Use actual earned marks
-          totalMarks: totalPossibleMarks // Use total possible marks
-        };
-      });
-      
-      // Prepare packets with their individual scoring scales
-      const packetsWithScoringScales = quizPackets.map(packet => ({
-        ...packet,
-        // Include the scoring scale if it exists and is enabled
-        scoringScale: packet.scoringScale && packet.enableScoringScale ? packet.scoringScale : null
-      }));
-      
-      console.log('✅ Packets with scoring scales:', packetsWithScoringScales.map(p => ({
-        name: p.name,
-        hasScoringScale: !!p.scoringScale,
-        scoringScaleLength: p.scoringScale?.length || 0,
-        enableScoringScale: p.enableScoringScale
-      })));
-      
-      // Load template configuration for this quiz
-      let template = null;
-      try {
-        const templateData = await pdfTemplateApi.getTemplate(selectedQuiz.id);
-        if (templateData && templateData.template) {
-          template = templateData.template;
-          
-          console.log('🔄 Loaded template data:', {
-            hasTemplate: !!template,
-            hasPacketConfigs: !!(template && template.packetConfigs),
-            packetConfigsCount: template && template.packetConfigs ? Object.keys(template.packetConfigs).length : 0,
-            packetIds: template && template.packetConfigs ? Object.keys(template.packetConfigs) : []
-          });
-          
-          // Ensure packet configs have proper defaults if they exist
-          if (template && template.packetConfigs) {
-            Object.keys(template.packetConfigs).forEach(packetId => {
-              const config = template.packetConfigs[packetId];
-              console.log(`📋 Processing packet config for ${packetId}:`, {
-                enabled: config.enabled,
-                order: config.order,
-                title: config.title,
-                showHeader: config.showHeader
-              });
-              
-              // Add default values for any missing properties
-              template.packetConfigs[packetId] = {
-                borderRadius: '8px',
-                borderWidth: '1px',
-                borderColor: '#E8E6F4',
-                backgroundColor: '#ffffff',
-                fontSize: '14px',
-                fontWeight: 'normal',
-                padding: '20px',
-                margin: '16px 0px',
-                ...config // Override with actual config values
-              };
-            });
-          }
-          
-          console.log('✅ Loaded PDF template configuration for quiz:', selectedQuiz.id);
-          console.log('📋 Final template packet configs:', template?.packetConfigs);
-        } else {
-          console.log('ℹ️ No custom template found, using default configuration');
-        }
-      } catch (err) {
-        console.warn('⚠️ Failed to load template configuration:', err.message);
-      }
-
-      // Create PDF generator instance
-      const pdfGenerator = new PDFGenerator();
-      
-      console.log('🚀 Generating PDF report with packets containing individual scoring scales');
-      
-      console.log('🚀 About to call generateReport with:');
-      console.log('  - selectedQuiz:', selectedQuiz);
-      console.log('  - userData:', userData);
-      console.log('  - attempt:', attempt);
-      console.log('  - allQuestions length:', allQuestions.length);
-      console.log('  - packetsWithScoringScales length:', packetsWithScoringScales.length);
-      console.log('  - template configuration:', template ? 'Yes' : 'No');
-      
-      const pdfBlob = await pdfGenerator.generateReport(
-        selectedQuiz,
-        userData || { user_name: 'Unknown User', email: 'No email' },
-        attempt, // Pass the actual attempt data
-        allQuestions,
-        {}, // Mock answers
-        packetsWithScoringScales, // Pass packets with individual scoring scales
-        null, // No global scoring scale needed
-        template // Pass the template configuration
-      );
-
-      // Download the PDF
-      const fileName = `${selectedQuiz.name}_${userData?.user_name || 'User'}_${new Date(attempt.completed_at).toISOString().split('T')[0]}.pdf`;
-      
-      // Create download link
-      const url = URL.createObjectURL(pdfBlob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = fileName;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
+      const { pdf, baseFileName } = await renderAttemptToPdfBlob(attempt);
+      pdf.save(baseFileName);
     } catch (err) {
+      console.error('Failed to generate PDF:', err);
       setError(`Failed to generate PDF: ${err.message}`);
     } finally {
+      setActiveRenderData(null);
+      setGeneratingAttemptId(null);
       setGeneratingPDF(false);
     }
+  };
+
+  const handleDownloadAllPDFs = async () => {
+    if (filteredAttempts.length === 0 || bulkDownloading) return;
+
+    abortDownloadRef.current = false;
+    setBulkDownloading(true);
+    setBulkNotification(null);
+    setDownloadProgress({
+      current: 0,
+      total: filteredAttempts.length,
+      message: 'Initializing report generation...'
+    });
+
+    try {
+      const zip = new JSZip();
+      const usedFilenames = new Set();
+      let successCount = 0;
+      let failureCount = 0;
+
+      for (let i = 0; i < filteredAttempts.length; i++) {
+        if (abortDownloadRef.current) {
+          setBulkNotification({
+            type: 'warning',
+            message: `Batch download cancelled by user. ${successCount} reports packaged.`
+          });
+          break;
+        }
+
+        const attempt = filteredAttempts[i];
+        const profileInfo = getProfileInfo(attempt);
+        const candidateName = profileInfo.name || 'Candidate';
+
+        setDownloadProgress({
+          current: i + 1,
+          total: filteredAttempts.length,
+          message: `Rendering official report ${i + 1} of ${filteredAttempts.length} (${candidateName})...`
+        });
+
+        try {
+          const { pdfBlob, baseFileName } = await renderAttemptToPdfBlob(attempt);
+
+          // Ensure distinct filenames inside the ZIP
+          let uniqueName = baseFileName;
+          let counter = 1;
+          while (usedFilenames.has(uniqueName.toLowerCase())) {
+            uniqueName = baseFileName.replace(/\.pdf$/i, `_${counter}.pdf`);
+            counter++;
+          }
+          usedFilenames.add(uniqueName.toLowerCase());
+
+          zip.file(uniqueName, pdfBlob);
+          successCount++;
+        } catch (itemErr) {
+          console.error(`Failed to generate PDF for attempt ${attempt.id}:`, itemErr);
+          failureCount++;
+        }
+      }
+
+      setActiveRenderData(null);
+
+      if (abortDownloadRef.current) {
+        setBulkDownloading(false);
+        return;
+      }
+
+      if (successCount === 0) {
+        throw new Error('Could not generate any PDF reports.');
+      }
+
+      setDownloadProgress({
+        current: filteredAttempts.length,
+        total: filteredAttempts.length,
+        message: 'Packaging reports into ZIP archive...'
+      });
+
+      const zipBlob = await zip.generateAsync(
+        { type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } },
+        (metadata) => {
+          if (metadata.percent) {
+            setDownloadProgress(prev => ({
+              ...prev,
+              message: `Compressing ZIP: ${Math.round(metadata.percent)}%...`
+            }));
+          }
+        }
+      );
+
+      const safeQuizTitle = (selectedQuiz.name || 'Quiz')
+        .replace(/[/\\?%*:|"<>]/g, '_')
+        .replace(/_+/g, '_')
+        .trim();
+      const dateTag = new Date().toISOString().split('T')[0];
+      const zipFileName = `${safeQuizTitle}_Filtered_Reports_${dateTag}.zip`;
+
+      const downloadUrl = URL.createObjectURL(zipBlob);
+      const tempLink = document.createElement('a');
+      tempLink.href = downloadUrl;
+      tempLink.download = zipFileName;
+      document.body.appendChild(tempLink);
+      tempLink.click();
+      document.body.removeChild(tempLink);
+      URL.revokeObjectURL(downloadUrl);
+
+      setBulkNotification({
+        type: failureCount > 0 ? 'warning' : 'success',
+        message: failureCount > 0
+          ? `Successfully downloaded ${successCount} PDF reports in ZIP archive (${failureCount} failed).`
+          : `Successfully downloaded all ${successCount} PDF reports in "${zipFileName}"!`
+      });
+    } catch (err) {
+      console.error('Bulk download error:', err);
+      setBulkNotification({
+        type: 'error',
+        message: `Failed to download PDFs: ${err.message}`
+      });
+    } finally {
+      setActiveRenderData(null);
+      setBulkDownloading(false);
+    }
+  };
+
+  const handleCancelBulkDownload = () => {
+    abortDownloadRef.current = true;
+    setActiveRenderData(null);
+    setDownloadProgress(prev => ({ ...prev, message: 'Cancelling batch download...' }));
   };
 
   const formatDate = (dateString) => {
@@ -478,17 +520,103 @@ const AssessmentReport = () => {
         // Quiz Details View
         <div>
           <div className="report-detail-title-bar">
-            <button 
-              className="report-back-btn" 
-              onClick={() => setShowDetails(false)}
-            >
-              ← Back to Quizzes
-            </button>
-            
-            <h2 className="report-detail-title">
-              {selectedQuiz.name} - Quiz Reports
-            </h2>
+            <div className="report-detail-title-group">
+              <button 
+                className="report-back-btn" 
+                onClick={() => setShowDetails(false)}
+              >
+                ← Back to Quizzes
+              </button>
+              
+              <h2 className="report-detail-title">
+                {selectedQuiz.name} - Quiz Reports
+              </h2>
+            </div>
+
+            <div className="report-detail-header-actions">
+              <button
+                className="report-download-all-btn"
+                disabled={filteredAttempts.length === 0 || bulkDownloading || generatingPDF}
+                onClick={handleDownloadAllPDFs}
+                title={filteredAttempts.length === 0 
+                  ? "No attempts match current filters" 
+                  : `Download all ${filteredAttempts.length} filtered PDF reports as a ZIP archive`}
+              >
+                <FolderZipIcon style={{ fontSize: '20px' }} />
+                <span>
+                  {bulkDownloading 
+                    ? `Generating PDFs (${downloadProgress.current}/${downloadProgress.total})...` 
+                    : `Download All Filtered PDFs (${filteredAttempts.length})`}
+                </span>
+              </button>
+            </div>
           </div>
+
+          {generatingPDF && !bulkDownloading && (
+            <div className="report-progress-card">
+              <div className="report-progress-card__header">
+                <div className="report-progress-card__title-group">
+                  <div className="report-progress-card__spinner" />
+                  <div>
+                    <h4 className="report-progress-card__title">Generating Official Report PDF</h4>
+                    <p className="report-progress-card__status">Rendering complete HappiMynd report with radar charts, scores & analysis...</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {bulkDownloading && (
+            <div className="report-progress-card">
+              <div className="report-progress-card__header">
+                <div className="report-progress-card__title-group">
+                  <div className="report-progress-card__spinner" />
+                  <div>
+                    <h4 className="report-progress-card__title">Generating PDF Reports in Batch</h4>
+                    <p className="report-progress-card__status">{downloadProgress.message}</p>
+                  </div>
+                </div>
+                <button 
+                  className="report-progress-card__cancel-btn"
+                  onClick={handleCancelBulkDownload}
+                  type="button"
+                >
+                  Cancel
+                </button>
+              </div>
+              <div className="report-progress-bar-bg">
+                <div 
+                  className="report-progress-bar-fill" 
+                  style={{ 
+                    width: `${downloadProgress.total > 0 ? Math.round((downloadProgress.current / downloadProgress.total) * 100) : 0}%` 
+                  }} 
+                />
+              </div>
+              <div className="report-progress-card__footer">
+                <span>Processed {downloadProgress.current} of {downloadProgress.total}</span>
+                <span>{downloadProgress.total > 0 ? Math.round((downloadProgress.current / downloadProgress.total) * 100) : 0}%</span>
+              </div>
+            </div>
+          )}
+
+          {bulkNotification && (
+            <div className={`report-notification report-notification--${bulkNotification.type}`}>
+              <div className="report-notification__content">
+                {bulkNotification.type === 'success' && <CheckCircleIcon style={{ fontSize: '20px' }} />}
+                {bulkNotification.type === 'error' && <ErrorIcon style={{ fontSize: '20px' }} />}
+                {bulkNotification.type === 'warning' && <WarningIcon style={{ fontSize: '20px' }} />}
+                <span>{bulkNotification.message}</span>
+              </div>
+              <button 
+                className="report-notification__close" 
+                onClick={() => setBulkNotification(null)}
+                aria-label="Close notification"
+                type="button"
+              >
+                <CloseIcon style={{ fontSize: '18px' }} />
+              </button>
+            </div>
+          )}
 
           <div className="report-toolbar" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
             <div className="report-search" style={{ flex: '1', minWidth: '200px' }}>
@@ -579,6 +707,10 @@ const AssessmentReport = () => {
               <p className="report-summary-box__value">{quizAttempts.filter(a => a.status === 'completed').length}</p>
             </div>
             <div className="report-summary-box__item">
+              <p className="report-summary-box__label">Filtered Attempts</p>
+              <p className="report-summary-box__value" style={{ color: 'var(--color-primary)' }}>{filteredAttempts.length}</p>
+            </div>
+            <div className="report-summary-box__item">
               <p className="report-summary-box__label">Packets</p>
               <p className="report-summary-box__value">{quizPackets.length}</p>
             </div>
@@ -654,10 +786,17 @@ const AssessmentReport = () => {
                           <button
                             className="report-action-btn"
                             title="Download PDF Report"
-                            disabled={generatingPDF}
+                            disabled={generatingPDF || bulkDownloading}
                             onClick={() => handleGeneratePDF(attempt)}
                           >
-                            <DownloadIcon />
+                            {generatingAttemptId === attempt.id ? (
+                              <div
+                                className="report-progress-card__spinner"
+                                style={{ width: '16px', height: '16px', borderWidth: '2px' }}
+                              />
+                            ) : (
+                              <DownloadIcon />
+                            )}
                           </button>
                         </div>
                       </td>
@@ -678,6 +817,33 @@ const AssessmentReport = () => {
               </p>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Hidden container used to render official HappiMynd visual report for PDF generation */}
+      {activeRenderData && (
+        <div
+          id="offscreen-report-wrapper"
+          style={{
+            position: 'fixed',
+            left: 0,
+            top: 0,
+            width: '1050px',
+            backgroundColor: '#ffffff',
+            zIndex: -9999,
+            pointerEvents: 'none'
+          }}
+        >
+          <ReportContent
+            quiz={activeRenderData.quiz}
+            attempt={activeRenderData.attempt}
+            user={activeRenderData.user}
+            packets={activeRenderData.packets}
+            template={activeRenderData.template}
+            selectedPacketId="all"
+            containerRef={offscreenReportRef}
+            language="en"
+          />
         </div>
       )}
     </div>

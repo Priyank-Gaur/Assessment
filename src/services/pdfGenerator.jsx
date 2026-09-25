@@ -509,10 +509,12 @@ const AssessmentReportPDF = ({ quizData, userData, attemptData, packetScores, te
           <View style={styles.userInfo}>
             <Text style={styles.userLabel}>Completed:</Text>
             <Text style={styles.userValue}>
-              {new Date(attemptData.completed_at).toLocaleDateString('en-US', {
-                year: 'numeric', month: 'long', day: 'numeric',
-                hour: '2-digit', minute: '2-digit'
-              })}
+              {attemptData.completed_at && !isNaN(new Date(attemptData.completed_at).getTime())
+                ? new Date(attemptData.completed_at).toLocaleDateString('en-US', {
+                    year: 'numeric', month: 'long', day: 'numeric',
+                    hour: '2-digit', minute: '2-digit'
+                  })
+                : 'In Progress'}
             </Text>
           </View>
         </View>
